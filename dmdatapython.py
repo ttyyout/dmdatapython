@@ -183,6 +183,105 @@ class ConnectionStatusPanel(QWidget):
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.last_data_label.setText(f"마지막 데이터 수신: [{source}] {timestamp}")
 
+class AlertBox(QWidget):
+    """긴급지진속보 표시용 둥근 박스 위젯"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.text = "대기중"
+        self.alert_type = "normal"  # "normal", "warning", "canceled"
+        self._blink_opacity = 0.0
+        self.is_blinking = False
+        
+        # 박스 색상
+        self.normal_color = QColor("#F9D34C")  # 예보: 노란색
+        self.warning_color = QColor("#EA3829")  # 경보: 빨간색
+        self.base_bg_color = QColor("#2f4f4f")  # 기본 배경색 (진한 초록색)
+        self.fg_color = QColor("#bba878")  # 텍스트 색상 (원래 색상)
+        
+    def set_text(self, text):
+        self.text = text
+        self.update()
+    
+    def set_alert_type(self, alert_type):
+        self.alert_type = alert_type
+        self.update()
+    
+    def set_blink_opacity(self, opacity):
+        self._blink_opacity = opacity
+        self.update()
+    
+    def get_blink_opacity(self):
+        return self._blink_opacity
+    
+    blink_opacity = Property(float, get_blink_opacity, set_blink_opacity)
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        rect = self.rect()
+        
+        # 박스 색상 결정
+        if self.alert_type == "warning":
+            box_color = self.warning_color
+        elif self.alert_type == "canceled":
+            box_color = QColor("#0000ff")  # 취소: 파란색
+        else:
+            box_color = self.normal_color
+        
+        # 점멸 효과 적용 (사인곡선)
+        if self.is_blinking:
+            smooth_opacity = math.sin(self._blink_opacity * math.pi)
+            # 기본 배경색과 박스 색상을 블렌딩
+            blend_factor = smooth_opacity * 0.5
+            r = int(self.base_bg_color.red() + (box_color.red() - self.base_bg_color.red()) * blend_factor)
+            g = int(self.base_bg_color.green() + (box_color.green() - self.base_bg_color.green()) * blend_factor)
+            b = int(self.base_bg_color.blue() + (box_color.blue() - self.base_bg_color.blue()) * blend_factor)
+            final_color = QColor(r, g, b)
+        else:
+            final_color = box_color
+        
+        # 둥근 박스 그리기
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(final_color))
+        painter.drawRoundedRect(rect, 10, 10)  # 둥근 모서리
+        
+        # 텍스트 그리기 (원래 색상)
+        painter.setPen(self.fg_color)
+        painter.setFont(QFont("맑은 고딕", 24, QFont.Bold))
+        painter.drawText(rect, Qt.AlignCenter, self.text)
+
+class DetailBox(QWidget):
+    """상세정보 표시용 박스 위젯 (점멸하지 않음)"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.text = ""
+        self.bg_color = QColor("#2f4f4f")
+        self.fg_color = QColor("#bba878")
+        
+    def set_text(self, text):
+        self.text = text
+        self.update()
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        rect = self.rect()
+        
+        # 배경 박스 그리기
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(self.bg_color))
+        painter.drawRoundedRect(rect, 10, 10)
+        
+        # 텍스트 그리기
+        if self.text:
+            painter.setPen(self.fg_color)
+            painter.setFont(QFont("맑은 고딕", 24))
+            painter.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, self.text)
+
 class BroadcastWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -192,18 +291,18 @@ class BroadcastWindow(QWidget):
         self.bg_color = QColor("#2f4f4f")
         self.fg_color = QColor("#bba878")
         
-        self.status_label = QLabel("대기중", self)
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setStyleSheet(f"color: {self.fg_color.name()}; font-size: 24px;")
+        # 배경 설정
+        self.update_palette(self.bg_color, self.fg_color)
         
-        self.separator_label = QLabel("│", self)
-        self.separator_label.setStyleSheet(f"color: {self.fg_color.name()}; font-size: 30px; font-weight: bold;")
-        self.separator_label.hide()
+        # 긴급지진속보 박스 (위에 표시, 점멸함)
+        self.alert_box = AlertBox(self)
+        self.alert_box.setGeometry(0, 0, 0, 50)
+        self.alert_box.hide()
         
-        self.detail_label = QLabel("", self)
-        self.detail_label.setStyleSheet(f"color: {self.fg_color.name()}; font-size: 24px;")
-        self.detail_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.detail_label.hide()
+        # 상세정보 박스 (아래에 표시, 점멸하지 않음)
+        self.detail_box = DetailBox(self)
+        self.detail_box.setGeometry(0, 0, 0, 50)
+        self.detail_box.hide()
         
         # 텍스트 스크롤을 위한 타이머
         self.scroll_timer = QTimer()
@@ -211,17 +310,21 @@ class BroadcastWindow(QWidget):
         self.scroll_offset = 0
         self.full_detail_text = ""
         
+        # 점멸 애니메이션
         self._blink_opacity = 0.0
-        self.blink_animation = QPropertyAnimation(self, b"blink_opacity")
-        self.blink_animation.setDuration(1200)
-        self.blink_animation.setLoopCount(2)  # 2번 점멸
-        # valueChanged 시그널도 연결 (setter가 호출되지 않을 경우 대비)
-        self.blink_animation.valueChanged.connect(lambda val: self.update_blink_background(val))
-        self.blink_animation.finished.connect(self.on_blink_finished)  # 점멸 완료 후 이동
+        self.blink_animation = QPropertyAnimation(self.alert_box, b"blink_opacity")
+        self.blink_animation.setDuration(1200)  # 한 번 점멸 시간
+        self.blink_animation.setStartValue(0.0)
+        self.blink_animation.setEndValue(1.0)
+        self.blink_animation.setEasingCurve(QEasingCurve.Linear)
+        self.blink_animation.setLoopCount(3)  # 3회 점멸
+        self.blink_animation.finished.connect(self.on_blink_finished)
         
-        self.separator_animation = QPropertyAnimation(self.separator_label, b"geometry")
-        self.separator_animation.setDuration(500)
-        self.separator_animation.setEasingCurve(QEasingCurve.OutCubic)
+        # 박스 크기/위치 애니메이션
+        self.box_animation = QPropertyAnimation(self.alert_box, b"geometry")
+        self.box_animation.setDuration(1000)
+        self.box_animation.setEasingCurve(QEasingCurve.InOutSine)  # 사인곡선 easing
+        self.box_animation.finished.connect(self.on_box_animation_finished)
         
         self.is_testing = False
         self.pending_info_text = None
@@ -236,60 +339,56 @@ class BroadcastWindow(QWidget):
         self.rotation_timer.timeout.connect(self.rotate_earthquakes)
         self.current_rotation_index = 0
         
-        self.update_palette(self.bg_color, self.fg_color)
-        self.center_status_label()
+        # 대기중 표시
+        self.show_waiting()
         self.show()
-
-    def get_blink_opacity(self):
-        return self._blink_opacity
-    
-    def set_blink_opacity(self, value):
-        old_value = self._blink_opacity
-        self._blink_opacity = value
-        # QPropertyAnimation이 속성 값을 변경할 때마다 호출됨
-        # valueChanged 시그널도 연결되어 있으므로 중복 호출 방지
-        if abs(old_value - value) > 0.001:  # 값이 실제로 변경된 경우만
-            self.update_blink_background(value)
-    
-    # QPropertyAnimation이 인식할 수 있도록 Property로 등록
-    blink_opacity = Property(float, get_blink_opacity, set_blink_opacity)
-
-    def update_blink_background(self, opacity):
-        smooth_opacity = math.sin(opacity * math.pi)
-        
-        if self.alert_type == "warning":
-            blink_color = QColor(255, 0, 0)
-        elif self.alert_type == "canceled":
-            blink_color = QColor(0, 0, 255)
-        else:
-            blink_color = QColor(255, 255, 0)
-            
-        base = self.bg_color
-        blend_factor = smooth_opacity * 0.35
-        r = int(base.red() + (blink_color.red() - base.red()) * blend_factor)
-        g = int(base.green() + (blink_color.green() - base.green()) * blend_factor)
-        b = int(base.blue() + (blink_color.blue() - base.blue()) * blend_factor)
-        blended_color = QColor(r, g, b)
-        pal = self.palette()
-        pal.setColor(QPalette.Window, blended_color)
-        self.setPalette(pal)
 
     def update_palette(self, bg, fg):
         pal = self.palette()
         pal.setColor(QPalette.Window, bg)
         self.setAutoFillBackground(True)
         self.setPalette(pal)
-
-    def center_status_label(self):
-        self.status_label.adjustSize()
-        self.status_label.move((self.width() - self.status_label.width()) // 2, 10)
+    
+    def show_waiting(self):
+        """대기중 상태 표시"""
+        self.alert_box.hide()
+        self.detail_box.hide()
+        self.alert_box.set_text("대기중")
+        self.alert_box.set_alert_type("normal")
+        self.alert_box.set_blink_opacity(0.0)
+        self.alert_box.is_blinking = False
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
-        stop_action = menu.addAction("알림 종료")
+        stop_action = menu.addAction("알림 끄기")
+        menu.addSeparator()
+        test_forecast_action = menu.addAction("예보 테스트")
+        test_warning_action = menu.addAction("경보 테스트")
         action = menu.exec(QCursor.pos())
         if action == stop_action:
             self.stop_alert()
+        elif action == test_forecast_action:
+            self.test_eew_alert(is_warning=False)
+        elif action == test_warning_action:
+            self.test_eew_alert(is_warning=True)
+    
+    def test_eew_alert(self, is_warning=False):
+        """테스트용 EEW 알림"""
+        test_event_id = f"TEST_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        test_info_text = "테스트용 지진 정보입니다. 이것은 긴급지진속보 테스트 메시지입니다."
+        
+        self.start_eew_alert(
+            test_info_text,
+            event_id=test_event_id,
+            serial_no=1,
+            is_warning=is_warning,
+            is_canceled=False,
+            is_update=False,
+            source="TEST",
+            is_final=False,
+            final_serial=None,
+            author=None
+        )
 
     def start_eew_alert(self, info_text, event_id=None, serial_no=None, is_warning=False, is_canceled=False, is_update=False, source="DMDATA", is_final=False, final_serial=None, author=None):
         """긴급지진속보 알림 시작 또는 업데이트"""
@@ -356,7 +455,7 @@ class BroadcastWindow(QWidget):
                 self.current_event_id = event_id
                 self.current_rotation_index = 0
                 self._update_display_for_earthquake(earthquake_data)
-                self.start_blinking()  # 2번 점멸 후 자동으로 이동
+                self.start_blinking()  # 3회 점멸 후 자동으로 이동
                 
                 # 여러 지진이 있으면 rotation 시작
                 if len(self.active_earthquakes) > 1:
@@ -368,7 +467,7 @@ class BroadcastWindow(QWidget):
                 self.current_event_id = event_id
                 self.current_rotation_index = 0
                 self._update_display_for_earthquake(earthquake_data)
-                # 중앙에 잠깐 표시 후 바로 이동
+                # 바로 왼쪽으로 이동 (점멸 없이)
                 QTimer.singleShot(100, self.start_move_animation)
                 
                 # 여러 지진이 있으면 rotation 시작
@@ -428,39 +527,13 @@ class BroadcastWindow(QWidget):
             self.alert_type = "normal"
             status_text = source_prefix + count_prefix + f"{alert_name}(예보){final_suffix}"
         
-        # 왼쪽으로 이동한 경우에만 | 기호 추가
-        if self.detail_label.isVisible():
-            status_text += " |"
+        # alert_box 텍스트 업데이트
+        self.alert_box.set_text(status_text)
+        self.alert_box.set_alert_type(self.alert_type)
         
-        self.status_label.setText(status_text)
-        self.status_label.adjustSize()
-        
-        # 아직 중앙에 있는 경우(1보만)만 중앙 정렬, 이미 왼쪽으로 이동한 경우는 왼쪽 정렬
-        if not self.detail_label.isVisible():
-            self.center_status_label()
-        else:
-            # 왼쪽 정렬
-            self.status_label.move(10, 10)
-            # detail_label을 status_label 바로 뒤에 배치
-            detail_start_x = self.status_label.x() + self.status_label.width() + 10
-            
-            self.full_detail_text = info_text
-            available_width = self.width() - detail_start_x - 20
-            self.detail_label.setGeometry(
-                detail_start_x, 10,
-                available_width, 30
-            )
-            self.detail_label.setText(info_text)
-            self.detail_label.adjustSize()
-            
-            # 텍스트가 영역을 넘어가면 스크롤 시작
-            if self.detail_label.width() > available_width:
-                self.scroll_offset = 0
-                if not self.scroll_timer.isActive():
-                    self.scroll_timer.start(50)
-            else:
-                self.scroll_timer.stop()
-                self.scroll_offset = 0
+        # detail_box 텍스트 업데이트
+        self.full_detail_text = info_text
+        self.detail_box.set_text(info_text)
     
     def rotate_earthquakes(self):
         """여러 지진을 5초마다 번갈아가며 표시"""
@@ -479,8 +552,8 @@ class BroadcastWindow(QWidget):
         
         self._update_display_for_earthquake(current_eq)
         
-        # detail_label이 보이지 않으면 애니메이션 시작
-        if not self.detail_label.isVisible() and not current_eq.get('is_canceled'):
+        # detail_box가 보이지 않으면 애니메이션 시작
+        if not self.detail_box.isVisible() and not current_eq.get('is_canceled'):
             QTimer.singleShot(100, self.start_move_animation)
 
     def schedule_final_return(self):
@@ -498,77 +571,84 @@ class BroadcastWindow(QWidget):
         self.final_timer.start(180000)
 
     def start_blinking(self):
+        """3회 점멸 시작"""
         print(f"💡 점멸 시작: alert_type={self.alert_type}")
-        # 애니메이션 초기화
+        # alert_box를 전체 창 크기로 설정
+        self.alert_box.setGeometry(0, 0, self.width(), 50)
+        self.alert_box.show()
+        self.alert_box.raise_()  # 맨 앞으로
+        
+        # 점멸 애니메이션 초기화
+        self.alert_box.is_blinking = True
         self.blink_animation.setStartValue(0.0)
         self.blink_animation.setEndValue(1.0)
         self.blink_animation.setEasingCurve(QEasingCurve.Linear)
-        self.blink_animation.setLoopCount(2)  # 2번 점멸로 초기화
-        # 초기 배경색 설정 (점멸 시작 전)
-        self.update_blink_background(0.0)
+        self.blink_animation.setLoopCount(3)  # 3회 점멸
         self.blink_animation.start()
     
     def on_blink_finished(self):
-        """2번 점멸 완료 후 무한 반복으로 전환하고 이동 애니메이션 시작"""
+        """3회 점멸 완료 후 무한 반복으로 전환하고 이동 애니메이션 시작"""
         if self.is_testing:
-            # 2번 점멸 후 무한 반복으로 전환 (대기중으로 복귀할 때까지 계속)
+            # 3회 점멸 후 무한 반복으로 전환 (대기중으로 복귀할 때까지 계속)
             self.blink_animation.setLoopCount(-1)
             self.blink_animation.start()
             self.start_move_animation()
 
     def start_move_animation(self):
+        """박스를 왼쪽으로 이동 (사인곡선 easing)"""
         if not self.is_testing:
             return
-            
-        end_x = 10
-        move_anim = QPropertyAnimation(self.status_label, b"pos")
-        move_anim.setDuration(1000)
-        move_anim.setStartValue(self.status_label.pos())
-        move_anim.setEndValue(QPoint(end_x, self.status_label.y()))
-        move_anim.setEasingCurve(QEasingCurve.OutCubic)
-        move_anim.finished.connect(self.show_detail_info)
-        move_anim.start()
-        self.move_animation = move_anim
+        
+        # 텍스트 너비 계산
+        from PySide6.QtGui import QFontMetrics
+        font = QFont("맑은 고딕", 24, QFont.Bold)
+        metrics = QFontMetrics(font)
+        text_width = metrics.horizontalAdvance(self.alert_box.text)
+        target_width = text_width + 40  # 좌우 여백 20px씩
+        
+        # 이동 애니메이션
+        self.box_animation.setStartValue(QRect(0, 0, self.width(), 50))
+        self.box_animation.setEndValue(QRect(0, 0, target_width, 50))
+        self.box_animation.start()
 
-    def show_detail_info(self):
+    def on_box_animation_finished(self):
+        """박스 이동 완료 후 상세정보 표시"""
         if not self.is_testing:
             return
         
-        # status_label에 | 기호 추가
-        current_text = self.status_label.text()
-        if not current_text.endswith(" |"):
-            self.status_label.setText(current_text + " |")
-            self.status_label.adjustSize()
-        
-        # detail_label을 status_label 바로 뒤에 배치 (왼쪽 정렬)
-        detail_start_x = self.status_label.x() + self.status_label.width() + 10
+        # alert_box 너비 가져오기
+        alert_box_width = self.alert_box.width()
+        detail_start_x = alert_box_width + 10
         available_width = self.width() - detail_start_x - 20
         
-        self.full_detail_text = self.pending_info_text or "지진 정보"
-        self.detail_label.setGeometry(
-            detail_start_x, 10,
-            available_width, 30
+        # detail_box 설정
+        self.detail_box.setGeometry(
+            detail_start_x, 0,
+            available_width, 50
         )
-        self.detail_label.setText(self.full_detail_text)
-        self.detail_label.adjustSize()
+        self.detail_box.set_text(self.full_detail_text)
+        self.detail_box.show()
         
         # 텍스트가 영역을 넘어가면 스크롤 시작
-        if self.detail_label.width() > available_width:
+        from PySide6.QtGui import QFontMetrics
+        font = QFont("맑은 고딕", 24)
+        metrics = QFontMetrics(font)
+        text_width = metrics.horizontalAdvance(self.full_detail_text)
+        if text_width > available_width:
             self.scroll_offset = 0
             self.scroll_timer.start(50)  # 50ms마다 스크롤
         else:
             self.scroll_timer.stop()
             self.scroll_offset = 0
-        
-        self.detail_label.show()
     
     def scroll_detail_text(self):
         """상세 정보 텍스트 자동 스크롤 (좌우 이동)"""
-        if not self.is_testing or not self.detail_label.isVisible():
+        if not self.is_testing or not self.detail_box.isVisible():
             self.scroll_timer.stop()
             return
         
-        detail_start_x = self.status_label.x() + self.status_label.width() + 10
+        alert_box_width = self.alert_box.width()
+        detail_start_x = alert_box_width + 10
         max_width = self.width() - detail_start_x - 20
         
         # 텍스트가 영역보다 길면 스크롤
@@ -581,12 +661,12 @@ class BroadcastWindow(QWidget):
                 
                 # QFontMetrics를 사용하여 실제 너비 계산
                 from PySide6.QtGui import QFontMetrics
-                font = self.detail_label.font()
+                font = QFont("맑은 고딕", 24)
                 metrics = QFontMetrics(font)
                 
                 # 너비에 맞게 텍스트 자르기
                 elided_text = metrics.elidedText(display_text, Qt.ElideRight, max_width)
-                self.detail_label.setText(elided_text)
+                self.detail_box.set_text(elided_text)
                 
                 self.scroll_offset += 2  # 2글자씩 이동
                 
@@ -622,19 +702,20 @@ class BroadcastWindow(QWidget):
         if self.scroll_timer.isActive():
             self.scroll_timer.stop()
         
-        if hasattr(self, 'move_animation'):
-            self.move_animation.stop()
-        if hasattr(self, 'separator_animation'):
-            self.separator_animation.stop()
+        if self.box_animation.state() == QPropertyAnimation.Running:
+            self.box_animation.stop()
         self.blink_animation.stop()
         
-        self.status_label.setText("대기중")
-        self.center_status_label()
-        self.detail_label.hide()
-        self.separator_label.hide()
+        # 위젯 숨김 및 초기화
+        self.alert_box.hide()
+        self.alert_box.is_blinking = False
+        self.alert_box.set_blink_opacity(0.0)
+        self.detail_box.hide()
         self.scroll_offset = 0
         self.full_detail_text = ""
-        self.update_palette(self.bg_color, self.fg_color)
+        
+        # 대기중 상태로 복귀
+        self.show_waiting()
 
 class EarthquakeInfoWidget(QWidget):
     """JQuake 스타일의 지진 정보 위젯"""
