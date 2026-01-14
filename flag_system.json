@@ -1,0 +1,14 @@
+{
+  "upper_flags": [
+    {
+      "id": "fbde2019",
+      "name": "D",
+      "is_upper": true,
+      "on_conditions": [],
+      "off_conditions": [],
+      "on_actions": [],
+      "off_actions": []
+    }
+  ],
+  "lower_flags": []
+}

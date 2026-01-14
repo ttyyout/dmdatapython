@@ -1,0 +1,22 @@
+{
+  "EEW 신규 발표": {
+    "flag_name": "eew",
+    "flag_value": true
+  },
+  "최종보 수신": {
+    "flag_name": "eew",
+    "flag_value": false
+  },
+  "진원·진도 수신": {
+    "flag_name": "detail",
+    "flag_value": true
+  },
+  "해일정보 발표": {
+    "flag_name": "tsunami",
+    "flag_value": true
+  },
+  "해일정보 취소": {
+    "flag_name": "tsunami",
+    "flag_value": false
+  }
+}
