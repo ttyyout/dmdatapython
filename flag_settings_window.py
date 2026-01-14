@@ -250,6 +250,9 @@ class FlagSystemSettingsWindow(QDialog):
             info_label.setWordWrap(True)
             info_label.setStyleSheet("background-color: #2a2a2a; padding: 15px; border-radius: 5px; color: #aaa;")
             right_panel.addWidget(info_label)
+            # 상위 플래그는 조건 목록 변수를 None으로 초기화
+            on_conditions_list = None
+            off_conditions_list = None
         
         layout.addLayout(right_panel, 2)
         
@@ -259,8 +262,8 @@ class FlagSystemSettingsWindow(QDialog):
         if is_upper:
             self.upper_flag_list = flag_list
             self.upper_flag_name_edit = flag_name_edit
-            self.upper_on_conditions_list = on_conditions_list
-            self.upper_off_conditions_list = off_conditions_list
+            self.upper_on_conditions_list = None
+            self.upper_off_conditions_list = None
         else:
             self.lower_flag_list = flag_list
             self.lower_flag_name_edit = flag_name_edit
