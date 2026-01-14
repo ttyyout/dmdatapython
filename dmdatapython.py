@@ -230,11 +230,25 @@ class AlertBox(QWidget):
         else:
             box_color = self.normal_color
         
-        # 점멸 효과 적용 (사인곡선)
+        # 점멸 효과 적용 (cos 기반 easing - 부드러운 호흡 효과)
         if self.is_blinking:
-            smooth_opacity = math.sin(self._blink_opacity * math.pi)
+            # cos 기반 easing 함수: (1 - cos(x)) / 2
+            # 이 함수는 시작점(x=0)과 끝점(x=π) 모두에서 기울기가 0이 되어
+            # 밝아질 때와 어두워질 때 모두 완전히 부드러운 전환을 제공합니다.
+            # sin 함수는 최저점에서 기울기가 0이 아니어서 "툭 튀는" 느낌이 있었지만,
+            # cos 기반 easing은 모든 구간에서 부드럽게 변화합니다.
+            raw_easing = (1.0 - math.cos(self._blink_opacity * math.pi)) / 2.0
+            
+            # 감마 보정 적용: 시각적 부드러움 강화
+            # 감마 값 1.5는 중간 밝기 구간을 더 부드럽게 만들어
+            # "숨 쉬듯 자연스러운" 점멸 효과를 구현합니다.
+            # (값이 1.0보다 크면 중간 톤이 더 부드럽게 전환됨)
+            gamma_corrected = raw_easing ** 1.5
+            
             # 기본 배경색과 박스 색상을 블렌딩
-            blend_factor = smooth_opacity * 0.5
+            # blend_factor는 0.0 (어두움) ~ 0.5 (밝음) 사이를 부드럽게 변화
+            blend_factor = gamma_corrected * 0.5
+            
             r = int(self.base_bg_color.red() + (box_color.red() - self.base_bg_color.red()) * blend_factor)
             g = int(self.base_bg_color.green() + (box_color.green() - self.base_bg_color.green()) * blend_factor)
             b = int(self.base_bg_color.blue() + (box_color.blue() - self.base_bg_color.blue()) * blend_factor)
@@ -578,38 +592,57 @@ class BroadcastWindow(QWidget):
         self.alert_box.show()
         self.alert_box.raise_()  # 맨 앞으로
         
-        # 점멸 애니메이션 초기화
-        self.alert_box.is_blinking = True
-        self.blink_animation.setStartValue(0.0)
-        self.blink_animation.setEndValue(1.0)
-        self.blink_animation.setEasingCurve(QEasingCurve.Linear)
-        self.blink_animation.setLoopCount(3)  # 3회 점멸
-        self.blink_animation.start()
+        # 점멸 애니메이션 초기화 (객체가 유효한지 확인)
+        try:
+            self.alert_box.is_blinking = True
+            self.blink_animation.setStartValue(0.0)
+            self.blink_animation.setEndValue(1.0)
+            self.blink_animation.setEasingCurve(QEasingCurve.Linear)
+            self.blink_animation.setLoopCount(3)  # 3회 점멸
+            self.blink_animation.start()
+        except RuntimeError:
+            # 애니메이션 객체가 이미 삭제된 경우 무시
+            print("⚠️ 점멸 애니메이션 객체가 이미 삭제되었습니다.")
+            return
     
     def on_blink_finished(self):
         """3회 점멸 완료 후 무한 반복으로 전환하고 이동 애니메이션 시작"""
-        if self.is_testing:
+        if not self.is_testing:
+            return
+        
+        # 애니메이션 객체가 유효한지 확인
+        try:
             # 3회 점멸 후 무한 반복으로 전환 (대기중으로 복귀할 때까지 계속)
             self.blink_animation.setLoopCount(-1)
             self.blink_animation.start()
             self.start_move_animation()
+        except RuntimeError:
+            # 애니메이션 객체가 이미 삭제된 경우 무시
+            print("⚠️ 애니메이션 객체가 이미 삭제되었습니다.")
+            return
 
     def start_move_animation(self):
         """박스를 왼쪽으로 이동 (사인곡선 easing)"""
         if not self.is_testing:
             return
         
-        # 텍스트 너비 계산
-        from PySide6.QtGui import QFontMetrics
-        font = QFont("맑은 고딕", 24, QFont.Bold)
-        metrics = QFontMetrics(font)
-        text_width = metrics.horizontalAdvance(self.alert_box.text)
-        target_width = text_width + 40  # 좌우 여백 20px씩
-        
-        # 이동 애니메이션
-        self.box_animation.setStartValue(QRect(0, 0, self.width(), 50))
-        self.box_animation.setEndValue(QRect(0, 0, target_width, 50))
-        self.box_animation.start()
+        # 애니메이션 객체가 유효한지 확인
+        try:
+            # 텍스트 너비 계산
+            from PySide6.QtGui import QFontMetrics
+            font = QFont("맑은 고딕", 24, QFont.Bold)
+            metrics = QFontMetrics(font)
+            text_width = metrics.horizontalAdvance(self.alert_box.text)
+            target_width = text_width + 40  # 좌우 여백 20px씩
+            
+            # 이동 애니메이션
+            self.box_animation.setStartValue(QRect(0, 0, self.width(), 50))
+            self.box_animation.setEndValue(QRect(0, 0, target_width, 50))
+            self.box_animation.start()
+        except RuntimeError:
+            # 애니메이션 객체가 이미 삭제된 경우 무시
+            print("⚠️ 이동 애니메이션 객체가 이미 삭제되었습니다.")
+            return
 
     def on_box_animation_finished(self):
         """박스 이동 완료 후 상세정보 표시"""
@@ -702,9 +735,17 @@ class BroadcastWindow(QWidget):
         if self.scroll_timer.isActive():
             self.scroll_timer.stop()
         
-        if self.box_animation.state() == QPropertyAnimation.Running:
-            self.box_animation.stop()
-        self.blink_animation.stop()
+        # 애니메이션 중지 (객체가 유효한 경우에만)
+        try:
+            if self.box_animation.state() == QPropertyAnimation.Running:
+                self.box_animation.stop()
+        except RuntimeError:
+            pass  # 애니메이션 객체가 이미 삭제된 경우 무시
+        
+        try:
+            self.blink_animation.stop()
+        except RuntimeError:
+            pass  # 애니메이션 객체가 이미 삭제된 경우 무시
         
         # 위젯 숨김 및 초기화
         self.alert_box.hide()
