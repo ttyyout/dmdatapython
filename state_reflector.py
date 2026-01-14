@@ -26,7 +26,7 @@ class StateReflector(QObject):
     1. 플래그가 켜지거나 꺼질 때 OBS를 직접 제어하지 않음
     2. 현재 켜진 상위 플래그 중 priority 기반으로 단일 winner 선택
     3. 오직 winner의 상태만 OBS에 반영
-    4. winner가 없으면 기본 상태 적용 (또는 아무것도 하지 않음)
+    4. winner가 없으면 아무것도 하지 않음 (사용자가 설정한 동작만 실행)
     """
     
     def __init__(self, flag_system: FlagSystem, obs_controller):
@@ -43,10 +43,6 @@ class StateReflector(QObject):
         # 현재 적용된 장면/녹화/버퍼 상태 (중복 실행 방지용)
         self.current_scene: Optional[str] = None
         self.current_recording_state: Optional[bool] = None
-        
-        # 기본 상태 (winner가 없을 때 사용)
-        self.default_scene: Optional[str] = None
-        self.default_recording_state: Optional[bool] = None
         
         # 상태 반영 타이머 (플래그 평가 후 실행)
         self.reflection_timer = QTimer()
@@ -79,7 +75,7 @@ class StateReflector(QObject):
         2. 현재 켜진 모든 상위 플래그를 기반으로 단일 winner 선택
         3. winner 결정은 오직 decide_upper_flag_winner()만 수행
         4. winner가 있으면 winner의 on_actions만 실행
-        5. winner가 없으면 기본 상태 적용
+        5. winner가 없으면 아무것도 하지 않음
         
         [OFF 이벤트 처리의 절대 규칙]
         - 어떤 상위 플래그가 OFF 되더라도 OBS를 즉시 변경하지 않는다.
@@ -89,7 +85,7 @@ class StateReflector(QObject):
         
         [시나리오 보장]
         - 시나리오 1: 일본 EEW 발생 → 5초 후 대만 EEW 발생 → 일본 EEW 종료
-          → 대만 EEW가 여전히 켜져 있으면 절대 기본 화면으로 돌아가지 않음
+          → 대만 EEW가 여전히 켜져 있으면 대만 EEW의 설정된 동작이 계속 실행됨
         - 시나리오 2: EEW 없이 진도속보 → 각지진도정보 → 하위 플래그 종료
           → 상위 맥락이 유지됨
         
@@ -124,9 +120,9 @@ class StateReflector(QObject):
                 # 더 높은 우선순위 플래그가 켜져 있으면 그 플래그가 winner가 됨
                 self._apply_winner_actions(winner)
             else:
-                # winner가 없으면 기본 상태 적용
-                # 모든 상위 플래그가 꺼졌을 때만 실행됨
-                self._apply_default_state()
+                # winner가 없으면 아무것도 하지 않음
+                # 사용자가 설정한 동작이 없으면 시스템은 아무것도 하지 않음
+                pass
         
         # 5단계: 현재 winner 업데이트
         self.current_winner = winner
@@ -158,8 +154,8 @@ class StateReflector(QObject):
              → 동일 priority면 마지막으로 켜진 플래그 선택
            - 숫자 priority 플래그가 없고 null 플래그만 있다면
              → 가장 최근에 ON 된 플래그 1개 선택
-           - 켜진 상위 플래그가 하나도 없다면
-             → None 반환 (기본 상태 적용)
+              - 켜진 상위 플래그가 하나도 없다면
+                → None 반환 (아무것도 하지 않음)
         
         [구조적 보장]
         - 이 함수는 항상 동일한 입력에 대해 동일한 결과를 반환한다.
@@ -202,7 +198,7 @@ class StateReflector(QObject):
     
     def _select_winner(self) -> Optional[Flag]:
         """
-        [레거시 래퍼 - 내부적으로 decide_upper_flag_winner() 호출]
+        Winner 선택 래퍼 - 내부적으로 decide_upper_flag_winner() 호출
         
         이 함수는 decide_upper_flag_winner()를 호출하는 래퍼일 뿐이다.
         실제 결정 로직은 decide_upper_flag_winner()에 있다.
@@ -230,23 +226,6 @@ class StateReflector(QObject):
         for action in winner.on_actions:
             self._execute_upper_action(action, winner)
     
-    def _apply_default_state(self):
-        """
-        기본 상태 적용 (winner가 없을 때)
-        
-        [절대 규칙]
-        - 모든 상위 플래그가 꺼졌을 때만 실행됨
-        - 더 높은 우선순위 플래그가 켜져 있으면 절대 실행되지 않음
-        
-        [시나리오 보장]
-        - 일본 EEW 종료 → 대만 EEW가 여전히 켜져 있으면 이 함수는 실행되지 않음
-        - 모든 상위 플래그가 꺼졌을 때만 기본 상태로 복귀
-        """
-        # 기본 상태 적용 로직 (필요시 구현)
-        # 예: self.obs_controller.switch_scene(self.default_scene)
-        # 현재는 아무것도 하지 않음 (기본 상태 유지)
-        print(f"ℹ️ [상태 반영] 모든 상위 플래그가 꺼짐 → 기본 상태 유지")
-        pass
     
     def _resolve_conflict(self, conflicting_flags: List[Flag]) -> Optional[Flag]:
         """

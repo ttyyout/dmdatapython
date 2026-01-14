@@ -216,3 +216,4 @@ is_last_info = body_main.get("isLastInfo", False)
 - 진도속보: https://dmdata.jp/docs/manual/intensity/
 - 진원정보: https://dmdata.jp/docs/manual/hypocenter/
 
+

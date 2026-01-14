@@ -209,6 +209,11 @@ class AlertBox(QWidget):
     
     def _update_box_width_by_text(self):
         """QFontMetrics를 사용하여 텍스트 길이에 맞게 박스 폭 자동 조절"""
+        # 애니메이션 중이거나 점멸 시작 전에는 폭을 변경하지 않음
+        # (start_blinking에서 전체 창 크기로 설정하기 전에 폭이 변경되는 것을 방지)
+        if self._is_animating or self.is_blinking:
+            return
+        
         from PySide6.QtGui import QFontMetrics
         font = QFont("맑은 고딕", 24, QFont.Bold)
         metrics = QFontMetrics(font)
@@ -218,12 +223,12 @@ class AlertBox(QWidget):
         padding = 40  # 좌우 여백 (20px씩)
         target_width = text_width + padding
         
-        # 현재 폭과 다르면 업데이트 (애니메이션 중이 아닐 때만)
+        # 현재 폭과 다르면 업데이트
         if self.width() != target_width:
-            # 애니메이션이 실행 중이 아닐 때만 직접 폭 변경
-            # 애니메이션 중에는 애니메이션이 폭을 제어하므로 여기서는 건드리지 않음
-            if not self._is_animating:
-                self.setFixedWidth(target_width)
+            # FixedWidth 제약이 있을 수 있으므로 해제 후 설정
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(9999)
+            self.setFixedWidth(target_width)
     
     def set_alert_type(self, alert_type):
         self.alert_type = alert_type
@@ -387,7 +392,7 @@ class BroadcastWindow(QWidget):
         pal.setColor(QPalette.Window, bg)
         self.setAutoFillBackground(True)
         self.setPalette(pal)
-    
+
     def show_waiting(self):
         """대기중 상태 표시"""
         self.alert_box.hide()
@@ -538,7 +543,8 @@ class BroadcastWindow(QWidget):
         current_index = list(self.active_earthquakes.keys()).index(event_id) + 1
         count_prefix = f"({current_index}/{total_count}) " if total_count > 1 else ""
         
-        source_prefix = "[대만] " if source == "EXPTECH" else "[일본] "
+        # 소스 접두사 제거 (사용자 요청)
+        source_prefix = ""
         
         # 용어 선택 (대만: 강진즉시경보, 한국: 지진조기경보, 일본: 긴급지진속보)
         if source == "EXPTECH":
@@ -612,7 +618,13 @@ class BroadcastWindow(QWidget):
     def start_blinking(self):
         """3회 점멸 시작"""
         print(f"💡 점멸 시작: alert_type={self.alert_type}")
-        # alert_box를 전체 창 크기로 설정
+        # 애니메이션 시작 전 플래그 설정 (폭 자동 조절 방지)
+        self.alert_box._is_animating = True
+        
+        # alert_box를 전체 창 크기로 설정 (FixedWidth 제약 해제 후)
+        # setFixedWidth로 고정된 폭을 해제하기 위해 setMinimumWidth/setMaximumWidth 사용
+        self.alert_box.setMinimumWidth(0)
+        self.alert_box.setMaximumWidth(9999)
         self.alert_box.setGeometry(0, 0, self.width(), 50)
         self.alert_box.show()
         self.alert_box.raise_()  # 맨 앞으로
@@ -650,7 +662,7 @@ class BroadcastWindow(QWidget):
         """박스를 왼쪽으로 이동 (사인곡선 easing)"""
         if not self.is_testing:
             return
-        
+            
         # 애니메이션 객체가 유효한지 확인
         try:
             # 텍스트 너비 계산
@@ -704,13 +716,13 @@ class BroadcastWindow(QWidget):
         else:
             self.scroll_timer.stop()
             self.scroll_offset = 0
-    
+
     def scroll_detail_text(self):
         """상세 정보 텍스트 자동 스크롤 (좌우 이동)"""
         if not self.is_testing or not self.detail_box.isVisible():
             self.scroll_timer.stop()
             return
-        
+            
         alert_box_width = self.alert_box.width()
         detail_start_x = alert_box_width + 10
         max_width = self.width() - detail_start_x - 20
@@ -1366,7 +1378,7 @@ class DetailWindow(QWidget):
             print(f"❌ 플래그 설정 창을 불러올 수 없습니다: {e}")
     
     def open_workflow_settings(self):
-        """OBS 워크플로우 설정 창 열기 (레거시 - 호환성 유지)"""
+        """OBS 워크플로우 설정 창 열기 (호환성 유지)"""
         workflow_window = OBSWorkflowSettingsWindow(self.obs_controller, self.event_state_manager, self)
         workflow_window.exec()
     
@@ -1495,45 +1507,8 @@ class EventStateManager(QObject):
             "has_earthquake": False,  # 긴급지진속보 + 지진상세정보 통합
             "has_active_earthquake": False
         }
-        self.current_scene = "일반"
         self.obs_controller = None
         self.workflow_engine = None  # 워크플로우 실행 엔진
-        
-        # 무감지진 타이머 관리 {event_id: timer}
-        self.undetected_timers = {}
-        
-        # 진원진도정보 수신 후 5초 타이머 {event_id: timer}
-        self.detail_complete_timers = {}
-        
-        # 장면 재계산 타이머 (주기적 실행 - 단일 트리거)
-        self.scene_recompute_timer = None
-        self._init_scene_recompute_timer()
-    
-    def _init_scene_recompute_timer(self):
-        """장면 재계산 타이머 초기화 - 주기적으로 장면을 재계산"""
-        # QTimer를 사용하여 주기적으로 장면 재계산 (100ms마다)
-        # 이렇게 하면 상태 변경과 장면 재계산이 완전히 분리됨
-        self.scene_recompute_timer = QTimer()
-        self.scene_recompute_timer.timeout.connect(self.recompute_scene)
-        self.scene_recompute_timer.start(100)  # 100ms마다 실행
-    
-    def _load_scene_rules(self):
-        """장면 전환 규칙 로드"""
-        import json
-        import os
-        try:
-            if os.path.exists("scene_rules.json"):
-                with open("scene_rules.json", 'r', encoding='utf-8') as f:
-                    return json.load(f)
-        except Exception as e:
-            print(f"❌ 장면 전환 규칙 로드 실패: {e}")
-        
-        # 기본값
-        return {
-            "rule1": {"flag": "해일 상태", "scene": "해일"},
-            "rule2": {"flag": "지진/EEW/상세정보 상태", "scene": "일본"},
-            "rule3": {"scene": "일반"}
-        }
     
     def set_obs_controller(self, obs_controller):
         """OBS 제어기를 설정하고 워크플로우 엔진 초기화"""
@@ -1555,12 +1530,9 @@ class EventStateManager(QObject):
             "eew_active": False,
             "eew_canceled": False,  # 긴급지진속보 취소보
             "eew_final": False,
-            "eew_first_received_time": None,  # 첫 긴급지진속보 수신 시간 (무감지진 판단용)
             "report_sokuhou": False,  # 진도속보 수신 여부
             "report_epicenter": False,  # 진원정보 수신 여부
             "report_detail": False,  # 진원진도정보 수신 여부
-            "report_detail_received_time": None,  # 진원진도정보 수신 시간
-            "earthquake_completed": False,  # 지진 플래그 완료 여부
             "source": source
         }
     
@@ -1598,7 +1570,7 @@ class EventStateManager(QObject):
             fact_type = 'TSUNAMI_CANCELED' if is_canceled else 'TSUNAMI_RECEIVED'
             self.flag_system.trigger_event(fact_type, event_data)
         
-        # 상태만 업데이트 (장면 재계산은 주기적 타이머가 담당)
+        # 상태만 업데이트
         self.update_global_flags()
     
     def handle_eew(self, event_id, serial_no, is_final=False, is_warning=False, is_canceled=False, source="DMDATA"):
@@ -1607,16 +1579,11 @@ class EventStateManager(QObject):
         
         if is_new:
             self.earthquake_states[event_id] = self.create_state(event_id, source)
-            # 첫 긴급지진속보 수신 시간 기록
-            self.earthquake_states[event_id]["eew_first_received_time"] = time.time()
-            # 무감지진 타이머 시작 (10분)
-            self.start_undetected_timer(event_id)
         
         # 상태 업데이트 (워크플로우와 무관하게 항상 수행)
         if is_canceled:
             self.earthquake_states[event_id]["eew_canceled"] = True
             self.earthquake_states[event_id]["eew_active"] = False
-            self.stop_undetected_timer(event_id)
         elif is_final:
             self.earthquake_states[event_id]["eew_final"] = True
             self.earthquake_states[event_id]["eew_active"] = False
@@ -1674,7 +1641,7 @@ class EventStateManager(QObject):
             
             self.flag_system.trigger_event(fact_type, event_data)
         
-        # 상태만 업데이트 (장면 재계산은 주기적 타이머가 담당)
+        # 상태만 업데이트
         self.update_global_flags()
     
     def handle_report(self, event_id, report_type, source="DMDATA", is_update_epicenter=False, has_tsunami=False, has_lpgm=False):
@@ -1683,13 +1650,8 @@ class EventStateManager(QObject):
         if is_first_report:
             # 긴급지진속보 없이 지진상세정보가 발표된 경우
             self.earthquake_states[event_id] = self.create_state(event_id, source)
-            # 지진 플래그 활성화 (긴급지진속보 없이도 지진으로 인식)
-            self.earthquake_states[event_id]["report_first_received_time"] = time.time()
             # 긴급지진속보 없이 발표된 경우임을 표시
             self.earthquake_states[event_id]["no_eew"] = True
-        
-        # 무감지진 타이머 중지 (정보가 들어왔으므로)
-        self.stop_undetected_timer(event_id)
         
         # 갱신 처리: 같은 event_id로 여러 번 발표될 수 있음
         if report_type == "sokuhou":
@@ -1697,10 +1659,7 @@ class EventStateManager(QObject):
         elif report_type == "epicenter":
             self.earthquake_states[event_id]["report_epicenter"] = True
         elif report_type == "detail":
-            # 진원진도정보 수신: 5초 후 지진 플래그 해제 (다른 플래그 없을 때)
             self.earthquake_states[event_id]["report_detail"] = True
-            self.earthquake_states[event_id]["report_detail_received_time"] = time.time()
-            self.start_detail_complete_timer(event_id)
         
         # 워크플로우 엔진에 이벤트 사실 전달 (조건 확인 후 상태 관리자에 전달)
         if self.workflow_engine:
@@ -1725,83 +1684,8 @@ class EventStateManager(QObject):
             if fact_type:
                 self.workflow_engine.trigger_event_fact(fact_type, event_data)
         
-        # 상태만 업데이트 (장면 재계산은 주기적 타이머가 담당)
+        # 상태만 업데이트
         self.update_global_flags()
-    
-    def start_undetected_timer(self, event_id):
-        """무감지진 타이머 시작 (10분) - 주기적으로 체크"""
-        self.stop_undetected_timer(event_id)  # 기존 타이머가 있으면 중지
-        
-        def check_undetected():
-            if event_id not in self.earthquake_states:
-                return
-            
-            state = self.earthquake_states[event_id]
-            
-            # 이미 완료되었거나 취소되었으면 중지
-            if state["earthquake_completed"] or state["eew_canceled"]:
-                self.stop_undetected_timer(event_id)
-                return
-            
-            # 상세정보가 들어왔으면 중지
-            if state["report_sokuhou"] or state["report_epicenter"] or state["report_detail"]:
-                self.stop_undetected_timer(event_id)
-                return
-            
-            # 10분 경과 확인
-            if state.get("eew_first_received_time"):
-                elapsed = time.time() - state["eew_first_received_time"]
-                if elapsed >= 600:  # 10분 = 600초
-                    print(f"⚠️ 무감지진 판단: {event_id} (10분간 정보 없음)")
-                    # 지진 플래그 해제 (상태 변경만 수행)
-                    self.earthquake_states[event_id]["earthquake_completed"] = True
-                    self.update_global_flags()
-                    # 장면 재계산은 주기적 타이머가 담당
-                    self.stop_undetected_timer(event_id)
-                    return
-            
-            # 아직 10분이 안 지났으면 1초 후 다시 체크
-            timer = threading.Timer(1.0, check_undetected)
-            timer.daemon = True
-            timer.start()
-            self.undetected_timers[event_id] = timer
-        
-        # 첫 체크 시작
-        check_undetected()
-    
-    def stop_undetected_timer(self, event_id):
-        """무감지진 타이머 중지"""
-        if event_id in self.undetected_timers:
-            self.undetected_timers[event_id].cancel()
-            del self.undetected_timers[event_id]
-    
-    def start_detail_complete_timer(self, event_id):
-        """진원진도정보 수신 후 5초 타이머 시작"""
-        self.stop_detail_complete_timer(event_id)  # 기존 타이머가 있으면 중지
-        
-        def complete_earthquake():
-            if event_id not in self.earthquake_states:
-                return
-            
-            state = self.earthquake_states[event_id]
-            
-            # 다른 플래그(해일정보)가 없으면 지진 플래그 해제 (상태 변경만 수행)
-            if not state["tsunami_active"] or state["tsunami_canceled"]:
-                print(f"✅ 지진 완료: {event_id} (진원진도정보 수신 후 5초 경과)")
-                self.earthquake_states[event_id]["earthquake_completed"] = True
-                self.update_global_flags()
-                # 장면 재계산은 주기적 타이머가 담당
-        
-        timer = threading.Timer(5.0, complete_earthquake)
-        timer.daemon = True
-        timer.start()
-        self.detail_complete_timers[event_id] = timer
-    
-    def stop_detail_complete_timer(self, event_id):
-        """진원진도정보 완료 타이머 중지"""
-        if event_id in self.detail_complete_timers:
-            self.detail_complete_timers[event_id].cancel()
-            del self.detail_complete_timers[event_id]
     
     def update_global_flags(self):
         """전역 플래그 업데이트"""
@@ -1811,14 +1695,12 @@ class EventStateManager(QObject):
             for state in self.earthquake_states.values()
         )
         
-        # 지진 플래그: 긴급지진속보 또는 지진상세정보가 있고, 완료되지 않았으면 True
+        # 지진 플래그: 긴급지진속보 또는 지진상세정보가 있으면 True
         self.global_flags["has_earthquake"] = any(
-            not state["earthquake_completed"] and (
-                (state["eew_active"] and not state["eew_canceled"]) or  # 긴급지진속보 진행 중
-                state["report_sokuhou"] or  # 진도속보 수신
-                state["report_epicenter"] or  # 진원정보 수신
-                state["report_detail"]  # 진원진도정보 수신
-            )
+            (state["eew_active"] and not state["eew_canceled"]) or  # 긴급지진속보 진행 중
+            state["report_sokuhou"] or  # 진도속보 수신
+            state["report_epicenter"] or  # 진원정보 수신
+            state["report_detail"]  # 진원진도정보 수신
             for state in self.earthquake_states.values()
         )
         
@@ -1833,7 +1715,7 @@ class EventStateManager(QObject):
         워크플로우에서 전달받은 이벤트 사실 처리
         
         워크플로우는 조건을 만족하면 이벤트 사실을 이 함수로 전달합니다.
-        이 함수는 상태만 업데이트합니다. 장면 재계산은 주기적 타이머가 담당합니다.
+        이 함수는 상태만 업데이트합니다.
         """
         # 이벤트 사실에 따라 상태 업데이트만 수행
         event_id = event_data.get('event_id')
@@ -1873,119 +1755,27 @@ class EventStateManager(QObject):
             self.earthquake_states[event_id]["tsunami_canceled"] = True
             self.earthquake_states[event_id]["tsunami_active"] = False
         
-        # 상태만 업데이트 (장면 재계산은 주기적 타이머가 담당)
+        # 상태만 업데이트
         self.update_global_flags()
-    
-    def recompute_scene(self):
-        """
-        OBS 장면 재계산 - 단일 결정 함수 (주기적 타이머에서만 호출)
-        
-        전체 상태 스냅샷을 보고 장면을 결정합니다.
-        이 함수는 오직 "활성 이벤트가 하나라도 있는가"만을 기준으로 판단합니다.
-        
-        활성 이벤트 집합을 명시적으로 계산하고,
-        활성 이벤트가 0개일 때만 기본 화면으로 전환합니다.
-        """
-        # 활성 이벤트 집합 계산
-        active_event_ids = []
-        
-        for event_id, state in self.earthquake_states.items():
-            # 해일정보 활성 여부
-            has_tsunami = state["tsunami_active"] and not state["tsunami_canceled"]
-            
-            # 지진 활성 여부
-            has_earthquake = (
-                not state["earthquake_completed"] and (
-                    (state["eew_active"] and not state["eew_canceled"]) or
-                    state["report_sokuhou"] or
-                    state["report_epicenter"] or
-                    state["report_detail"]
-                )
-            )
-            
-            # 활성 이벤트인지 확인
-            if has_tsunami or has_earthquake:
-                active_event_ids.append(event_id)
-        
-        # 사용자 설정된 규칙에 따라 장면 결정
-        # 규칙 재로드 (설정 변경 반영)
-        self.scene_rules = self._load_scene_rules()
-        
-        # 플래그 상태 확인
-        has_tsunami = any(
-            state["tsunami_active"] and not state["tsunami_canceled"]
-            for state in self.earthquake_states.values()
-        )
-        
-        has_earthquake = any(
-            not state["earthquake_completed"] and (
-                (state["eew_active"] and not state["eew_canceled"]) or
-                state["report_sokuhou"] or
-                state["report_epicenter"] or
-                state["report_detail"]
-            )
-            for state in self.earthquake_states.values()
-        )
-        
-        # 사용자 설정 규칙에 따라 장면 결정
-        target_scene = None
-        
-        # 1순위 규칙 확인
-        if "rule1" in self.scene_rules:
-            rule1 = self.scene_rules["rule1"]
-            flag_type = rule1.get("flag", "해일 상태")
-            if flag_type == "해일 상태" and has_tsunami:
-                target_scene = rule1.get("scene", "해일")
-            elif flag_type == "지진/EEW/상세정보 상태" and has_earthquake:
-                target_scene = rule1.get("scene", "일본")
-        
-        # 2순위 규칙 확인 (1순위가 적용되지 않았을 때)
-        if target_scene is None and "rule2" in self.scene_rules:
-            rule2 = self.scene_rules["rule2"]
-            flag_type = rule2.get("flag", "지진/EEW/상세정보 상태")
-            if flag_type == "해일 상태" and has_tsunami:
-                target_scene = rule2.get("scene", "해일")
-            elif flag_type == "지진/EEW/상세정보 상태" and has_earthquake:
-                target_scene = rule2.get("scene", "일본")
-        
-        # 3순위 규칙 (1, 2순위가 모두 적용되지 않았을 때)
-        if target_scene is None:
-            if len(active_event_ids) == 0:
-                if "rule3" in self.scene_rules:
-                    target_scene = self.scene_rules["rule3"].get("scene", "일반")
-                else:
-                    target_scene = "일반"
-            else:
-                # 활성 이벤트가 있으면 현재 장면 유지
-                target_scene = self.current_scene
-        
-        # [레거시 코드] 장면 전환은 이제 플래그 시스템의 StateReflector가 담당합니다.
-        # OBS 직접 제어는 state_reflector.py에서만 수행됩니다.
-        # self.current_scene은 참고용으로만 유지합니다.
-        if self.current_scene != target_scene:
-            self.current_scene = target_scene
-            print(f"ℹ️ [레거시] 장면 결정: {target_scene} (활성 이벤트: {len(active_event_ids)}개) - 실제 전환은 StateReflector가 수행")
     
     def get_status_summary(self):
         """현재 상태 요약 반환"""
         active_events = []
         for event_id, state in self.earthquake_states.items():
-            if not state["earthquake_completed"]:
-                flags = []
-                if state["tsunami_active"] and not state["tsunami_canceled"]:
-                    flags.append("해일정보")
-                if (state["eew_active"] and not state["eew_canceled"]) or state["report_sokuhou"] or state["report_epicenter"] or state["report_detail"]:
-                    flags.append("지진")
-                
-                if flags:
-                    active_events.append({
-                        "event_id": event_id,
-                        "source": state["source"],
-                        "flags": flags
-                    })
+            flags = []
+            if state["tsunami_active"] and not state["tsunami_canceled"]:
+                flags.append("해일정보")
+            if (state["eew_active"] and not state["eew_canceled"]) or state["report_sokuhou"] or state["report_epicenter"] or state["report_detail"]:
+                flags.append("지진")
+            
+            if flags:
+                active_events.append({
+                    "event_id": event_id,
+                    "source": state["source"],
+                    "flags": flags
+                })
         
         return {
-            "current_scene": self.current_scene,
             "global_flags": self.global_flags.copy(),
             "active_events": active_events,
             "total_events": len(self.earthquake_states)
@@ -3098,7 +2888,7 @@ class ExpTechHandler(QObject):
         # TREM-ExpTech-Plugin처럼 로그인 후 서비스 토큰을 받을 수 있음
         # 하지만 기본적으로는 토큰 없이도 작동할 수 있음
         return self.service_token if self.service_token else ""
-    
+
     def fetch_eew_data(self):
         """ExpTech EEW 데이터 가져오기 (REST API 폴백) - 로드 밸런서 사용"""
         import random
@@ -3158,9 +2948,9 @@ class ExpTechHandler(QObject):
                 epicenter = eq_info.get("loc", eq_info.get("location", "미상"))
                 magnitude = eq_info.get("mag", eq_info.get("magnitude", eq_info.get("mag", "미상")))
                 depth = eq_info.get("depth", "미상")
-                
+            
                 origin_time = eq_info.get("time", eq_data.get("time", "-"))
-                
+            
                 max_intensity = eq_data.get("max", {})
                 if isinstance(max_intensity, dict):
                     max_intensity = max_intensity.get("intensity", eq_data.get("max_intensity", "미상"))
@@ -3183,35 +2973,35 @@ class ExpTechHandler(QObject):
                     "fjdzj": "푸젠성 지진국"
                 }
                 author_display = author_names.get(author, author.upper() if author else "알 수 없음")
-                
-                display_text = (
-                    f"{epicenter}에서 지진, "
-                    f"규모 {magnitude}, "
-                    f"깊이 {depth}km, "
+            
+            display_text = (
+                f"{epicenter}에서 지진, "
+                f"규모 {magnitude}, "
+                f"깊이 {depth}km, "
                     f"최대예측진도 {max_intensity} ({author_display})"
-                )
-                
-                earthquake_data = {
-                    "event_id": event_id,
-                    "serial_no": str(serial),
-                    "origin_time": origin_time,
-                    "epicenter": epicenter,
-                    "magnitude": magnitude,
-                    "depth": depth,
-                    "max_intensity": max_intensity,
-                    "max_lg_intensity": "-",
+            )
+            
+            earthquake_data = {
+                "event_id": event_id,
+                "serial_no": str(serial),
+                "origin_time": origin_time,
+                "epicenter": epicenter,
+                "magnitude": magnitude,
+                "depth": depth,
+                "max_intensity": max_intensity,
+                "max_lg_intensity": "-",
                     "is_warning": is_warning,
                     "is_canceled": is_canceled,
-                    "display_text": display_text,
+                "display_text": display_text,
                     "source": "EXPTECH",
                     "author": author,
                     "is_final": is_final,
                     "final_serial": str(serial) if is_final else None
-                }
-                
-                is_update = (event_id in self.broadcast_window.active_earthquakes)
-                
-                self.eew_received.emit(earthquake_data, event_id, is_update)
+            }
+            
+            is_update = (event_id in self.broadcast_window.active_earthquakes)
+            
+            self.eew_received.emit(earthquake_data, event_id, is_update)
             
         except Exception as e:
             print(f"❌ ExpTech EEW 처리 오류: {e}")
@@ -4419,16 +4209,16 @@ class OBSWorkflowSettingsWindow(QDialog):
     
     def _execute_action(self, action):
         """
-        [레거시 테스트 메서드] 상태 변경 규칙 실행 (테스트용)
+        [테스트 메서드] 상태 변경 규칙 실행 (테스트용)
         
         ⚠️ 주의: OBS 직접 제어는 이제 state_reflector.py에서만 수행됩니다.
-        이 메서드는 레거시 워크플로우 테스트용이며, 실제 OBS 제어는 하지 않습니다.
+        이 메서드는 워크플로우 테스트용이며, 실제 OBS 제어는 하지 않습니다.
         """
         action_type = action.get('type', '')
         
         try:
             # 모든 OBS 제어는 StateReflector가 담당하므로, 여기서는 로그만 출력
-            print(f"  ⚠️ [레거시 테스트] 액션 타입: {action_type}")
+            print(f"  ⚠️ [테스트] 액션 타입: {action_type}")
             print(f"  ℹ️ 실제 OBS 제어는 StateReflector가 플래그 시스템 기반으로 수행합니다.")
             
             # 장면 전환은 시스템이 자동으로 결정
