@@ -179,56 +179,77 @@ class FlagSystemSettingsWindow(QDialog):
             else:
                 self.lower_priority_combo = priority_combo
         
-        # 부모 플래그 설정 (하위 플래그만)
+        # 연결된 상위 플래그 설정 (하위 플래그만)
         if not is_upper:
-            parent_layout = QHBoxLayout()
-            parent_layout.addWidget(QLabel("부모 플래그:"))
-            parent_combo = QComboBox()
-            parent_combo.addItem("(없음)", None)
+            target_upper_layout = QHBoxLayout()
+            target_upper_layout.addWidget(QLabel("연결된 상위 플래그:"))
+            target_upper_combo = QComboBox()
+            target_upper_combo.addItem("(없음)", None)
             for flag in self.flag_system.upper_flags.values():
-                parent_combo.addItem(flag.name, flag.flag_id)
-            parent_combo.currentIndexChanged.connect(lambda idx: self._on_parent_changed(parent_combo.itemData(idx), is_upper))
-            parent_layout.addWidget(parent_combo)
-            right_panel.addLayout(parent_layout)
-            self.lower_parent_combo = parent_combo
+                target_upper_combo.addItem(flag.name, flag.flag_id)
+            target_upper_combo.currentIndexChanged.connect(lambda idx: self._on_target_upper_changed(target_upper_combo.itemData(idx), is_upper))
+            target_upper_layout.addWidget(target_upper_combo)
+            right_panel.addLayout(target_upper_layout)
+            self.lower_target_upper_combo = target_upper_combo
+            
+            # 설명 문구
+            target_upper_desc = QLabel(
+                "이 하위 플래그가 켜지면 연결된 상위 플래그도 자동으로 켜집니다.\n"
+                "여러 하위 플래그가 같은 상위 플래그에 연결되면, 하나라도 켜져 있으면 상위 플래그는 켜집니다."
+            )
+            target_upper_desc.setWordWrap(True)
+            target_upper_desc.setStyleSheet("color: #888; padding: 5px; font-size: 9pt;")
+            right_panel.addWidget(target_upper_desc)
         
-        # 켜짐 조건
-        on_conditions_group = QGroupBox("켜짐 조건 (OR: 하나라도 만족하면 켜짐)")
-        on_conditions_layout = QVBoxLayout()
-        on_conditions_list = QListWidget()
-        on_conditions_list.setMaximumHeight(150)
-        on_conditions_layout.addWidget(on_conditions_list)
-        
-        on_condition_buttons = QHBoxLayout()
-        add_on_btn = QPushButton("조건 추가")
-        add_on_btn.clicked.connect(lambda: self._add_condition(is_upper, True))
-        remove_on_btn = QPushButton("조건 삭제")
-        remove_on_btn.clicked.connect(lambda: self._remove_condition(on_conditions_list, is_upper, True))
-        on_condition_buttons.addWidget(add_on_btn)
-        on_condition_buttons.addWidget(remove_on_btn)
-        on_conditions_layout.addLayout(on_condition_buttons)
-        
-        on_conditions_group.setLayout(on_conditions_layout)
-        right_panel.addWidget(on_conditions_group)
-        
-        # 꺼짐 조건
-        off_conditions_group = QGroupBox("꺼짐 조건 (OR: 하나라도 만족하면 꺼짐)")
-        off_conditions_layout = QVBoxLayout()
-        off_conditions_list = QListWidget()
-        off_conditions_list.setMaximumHeight(150)
-        off_conditions_layout.addWidget(off_conditions_list)
-        
-        off_condition_buttons = QHBoxLayout()
-        add_off_btn = QPushButton("조건 추가")
-        add_off_btn.clicked.connect(lambda: self._add_condition(is_upper, False))
-        remove_off_btn = QPushButton("조건 삭제")
-        remove_off_btn.clicked.connect(lambda: self._remove_condition(off_conditions_list, is_upper, False))
-        off_condition_buttons.addWidget(add_off_btn)
-        off_condition_buttons.addWidget(remove_off_btn)
-        off_conditions_layout.addLayout(off_condition_buttons)
-        
-        off_conditions_group.setLayout(off_conditions_layout)
-        right_panel.addWidget(off_conditions_group)
+        # 조건 설정 (하위 플래그만, 상위 플래그는 조건 없음)
+        if not is_upper:
+            # 켜짐 조건
+            on_conditions_group = QGroupBox("켜짐 조건 (OR: 하나라도 만족하면 켜짐)")
+            on_conditions_layout = QVBoxLayout()
+            on_conditions_list = QListWidget()
+            on_conditions_list.setMaximumHeight(150)
+            on_conditions_layout.addWidget(on_conditions_list)
+            
+            on_condition_buttons = QHBoxLayout()
+            add_on_btn = QPushButton("조건 추가")
+            add_on_btn.clicked.connect(lambda: self._add_condition(is_upper, True))
+            remove_on_btn = QPushButton("조건 삭제")
+            remove_on_btn.clicked.connect(lambda: self._remove_condition(on_conditions_list, is_upper, True))
+            on_condition_buttons.addWidget(add_on_btn)
+            on_condition_buttons.addWidget(remove_on_btn)
+            on_conditions_layout.addLayout(on_condition_buttons)
+            
+            on_conditions_group.setLayout(on_conditions_layout)
+            right_panel.addWidget(on_conditions_group)
+            
+            # 꺼짐 조건
+            off_conditions_group = QGroupBox("꺼짐 조건 (OR: 하나라도 만족하면 꺼짐)")
+            off_conditions_layout = QVBoxLayout()
+            off_conditions_list = QListWidget()
+            off_conditions_list.setMaximumHeight(150)
+            off_conditions_layout.addWidget(off_conditions_list)
+            
+            off_condition_buttons = QHBoxLayout()
+            add_off_btn = QPushButton("조건 추가")
+            add_off_btn.clicked.connect(lambda: self._add_condition(is_upper, False))
+            remove_off_btn = QPushButton("조건 삭제")
+            remove_off_btn.clicked.connect(lambda: self._remove_condition(off_conditions_list, is_upper, False))
+            off_condition_buttons.addWidget(add_off_btn)
+            off_condition_buttons.addWidget(remove_off_btn)
+            off_conditions_layout.addLayout(off_condition_buttons)
+            
+            off_conditions_group.setLayout(off_conditions_layout)
+            right_panel.addWidget(off_conditions_group)
+        else:
+            # 상위 플래그는 조건 없음 - 안내 메시지
+            info_label = QLabel(
+                "상위 플래그는 조건을 가지지 않습니다.\n"
+                "상위 플래그의 상태는 연결된 하위 플래그들의 상태를 OR 집계하여 자동으로 결정됩니다.\n"
+                "하위 플래그 탭에서 하위 플래그를 생성하고 '연결된 상위 플래그'를 설정하세요."
+            )
+            info_label.setWordWrap(True)
+            info_label.setStyleSheet("background-color: #2a2a2a; padding: 15px; border-radius: 5px; color: #aaa;")
+            right_panel.addWidget(info_label)
         
         layout.addLayout(right_panel, 2)
         
@@ -394,29 +415,30 @@ class FlagSystemSettingsWindow(QDialog):
                         if idx >= 0:
                             priority_combo.setCurrentIndex(idx)
                 
-                # 부모 플래그 설정 (하위 플래그만)
-                if not is_upper and hasattr(self, 'lower_parent_combo'):
-                    parent_combo = self.lower_parent_combo
-                    if flag.parent_flag_id:
-                        idx = parent_combo.findData(flag.parent_flag_id)
+                # 연결된 상위 플래그 설정 (하위 플래그만)
+                if not is_upper and hasattr(self, 'lower_target_upper_combo'):
+                    target_upper_combo = self.lower_target_upper_combo
+                    if flag.target_upper_flag_id:
+                        idx = target_upper_combo.findData(flag.target_upper_flag_id)
                         if idx >= 0:
-                            parent_combo.setCurrentIndex(idx)
+                            target_upper_combo.setCurrentIndex(idx)
                     else:
-                        parent_combo.setCurrentIndex(0)  # "(없음)"
+                        target_upper_combo.setCurrentIndex(0)  # "(없음)"
                 
-                # 조건 목록 업데이트
-                on_list = self.upper_on_conditions_list if is_upper else self.lower_on_conditions_list
-                off_list = self.upper_off_conditions_list if is_upper else self.lower_off_conditions_list
-                
-                on_list.clear()
-                for condition in flag.on_conditions:
-                    delay_text = f" (지연: {condition.delay}초)" if condition.delay > 0 else ""
-                    on_list.addItem(f"{condition.condition_type}{delay_text}")
-                
-                off_list.clear()
-                for condition in flag.off_conditions:
-                    delay_text = f" (지연: {condition.delay}초)" if condition.delay > 0 else ""
-                    off_list.addItem(f"{condition.condition_type}{delay_text}")
+                # 조건 목록 업데이트 (하위 플래그만)
+                if not is_upper:
+                    on_list = self.lower_on_conditions_list
+                    off_list = self.lower_off_conditions_list
+                    
+                    on_list.clear()
+                    for condition in flag.on_conditions:
+                        condition_text = self._format_condition_text(condition)
+                        on_list.addItem(condition_text)
+                    
+                    off_list.clear()
+                    for condition in flag.off_conditions:
+                        condition_text = self._format_condition_text(condition)
+                        off_list.addItem(condition_text)
                 break
     
     def _on_flag_selected_for_action(self, flag_list: QListWidget, is_upper: bool):
@@ -456,14 +478,15 @@ class FlagSystemSettingsWindow(QDialog):
         if self.current_flag and is_upper:
             self.current_flag.priority = priority
     
-    def _on_parent_changed(self, parent_flag_id, is_upper: bool):
-        """부모 플래그 변경 (하위 플래그만)"""
+    def _on_target_upper_changed(self, target_upper_flag_id, is_upper: bool):
+        """연결된 상위 플래그 변경 (하위 플래그만)"""
         if self.current_flag and not is_upper:
-            self.current_flag.parent_flag_id = parent_flag_id
+            self.current_flag.target_upper_flag_id = target_upper_flag_id
     
     def _add_condition(self, is_upper: bool, is_on: bool):
-        """조건 추가"""
-        if not self.current_flag:
+        """조건 추가 (하위 플래그만)"""
+        if not self.current_flag or is_upper:
+            # 상위 플래그는 조건을 가지지 않음
             return
         
         from condition_dialog import ConditionDialog
@@ -477,12 +500,16 @@ class FlagSystemSettingsWindow(QDialog):
                     self.current_flag.off_conditions.append(condition)
                 
                 self._on_flag_selected(
-                    self.upper_flag_list if is_upper else self.lower_flag_list,
+                    self.lower_flag_list,
                     is_upper
                 )
     
     def _remove_condition(self, condition_list: QListWidget, is_upper: bool, is_on: bool):
-        """조건 삭제"""
+        """조건 삭제 (하위 플래그만)"""
+        if is_upper:
+            # 상위 플래그는 조건을 가지지 않음
+            return
+        
         current_row = condition_list.currentRow()
         if current_row < 0 or not self.current_flag:
             return
@@ -495,7 +522,7 @@ class FlagSystemSettingsWindow(QDialog):
                 del self.current_flag.off_conditions[current_row]
         
         self._on_flag_selected(
-            self.upper_flag_list if is_upper else self.lower_flag_list,
+            self.lower_flag_list,
             is_upper
         )
     
@@ -536,6 +563,40 @@ class FlagSystemSettingsWindow(QDialog):
             self.upper_action_flag_list if is_upper else self.lower_action_flag_list,
             is_upper
         )
+    
+    def _format_condition_text(self, condition: FlagCondition) -> str:
+        """조건 텍스트 포맷팅 (파라미터 포함)"""
+        condition_type = condition.condition_type
+        params = condition.params or {}
+        delay_text = f" (지연: {condition.delay}초)" if condition.delay > 0 else ""
+        
+        # 다른 플래그 켜짐/꺼짐 조건의 경우 플래그 이름 표시
+        if condition_type in ["다른 플래그 켜짐", "다른 플래그 꺼짐"]:
+            flag_id = params.get("flag_id")
+            if flag_id:
+                # 플래그 이름 찾기
+                target_flag = self.flag_system.get_flag(flag_id)
+                if target_flag:
+                    flag_name = target_flag.name
+                    return f"{condition_type}: {flag_name}{delay_text}"
+                else:
+                    return f"{condition_type}: (알 수 없는 플래그: {flag_id}){delay_text}"
+            else:
+                return f"{condition_type}: (플래그 미지정){delay_text}"
+        
+        # EEW 조건의 경우 파라미터 표시
+        elif condition_type.startswith("EEW "):
+            param_parts = []
+            if "max_intensity" in params:
+                param_parts.append(f"최대진도≥{params['max_intensity']}")
+            if "source" in params:
+                param_parts.append(f"출처={params['source']}")
+            if param_parts:
+                return f"{condition_type} ({', '.join(param_parts)}){delay_text}"
+            return f"{condition_type}{delay_text}"
+        
+        # 기타 조건은 기본 형식
+        return f"{condition_type}{delay_text}"
     
     def save_and_close(self):
         """저장하고 닫기"""

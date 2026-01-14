@@ -1,14 +1,96 @@
 {
+  "metadata": {
+    "version": "2.0",
+    "winner_decision_rules": {
+      "priority_rule": "숫자가 낮을수록 우선순위가 높다 (1 < 2 < 3 < ...)",
+      "null_priority_rule": "priority가 null인 플래그는 모든 숫자 priority보다 항상 낮다",
+      "tie_breaker_rule": "동일 priority면 마지막으로 켜진 플래그 선택",
+      "auto_priority_rule": "priority가 모두 null이면 가장 최근에 켜진 플래그 선택"
+    },
+    "note": "이 JSON만으로 winner 결정이 100% 가능해야 함"
+  },
   "upper_flags": [
     {
       "id": "fbde2019",
-      "name": "D",
-      "is_upper": true,
+      "name": "일본해일장면",
+      "type": "upper",
+      "priority": 1,
+      "parent_flag_id": "fbde2019",
+      "last_state_change_time": null,
+      "state": false,
+      "on_conditions": [
+        {
+          "type": "다른 플래그 켜짐",
+          "params": {
+            "flag_id": "00b09531"
+          },
+          "delay": 0.0
+        }
+      ],
+      "off_conditions": [
+        {
+          "type": "다른 플래그 꺼짐",
+          "params": {
+            "flag_id": "00b09531"
+          },
+          "delay": 0.0
+        }
+      ],
+      "on_actions": [],
+      "off_actions": []
+    },
+    {
+      "id": "75fb3ae6",
+      "name": "일본지진장면",
+      "type": "upper",
+      "priority": 2,
+      "parent_flag_id": null,
+      "last_state_change_time": null,
+      "state": false,
       "on_conditions": [],
       "off_conditions": [],
       "on_actions": [],
       "off_actions": []
     }
   ],
-  "lower_flags": []
+  "lower_flags": [
+    {
+      "id": "00b09531",
+      "name": "일본해일",
+      "type": "lower",
+      "priority": null,
+      "parent_flag_id": "fbde2019",
+      "last_state_change_time": null,
+      "state": false,
+      "on_conditions": [
+        {
+          "type": "해일정보 발표",
+          "params": {},
+          "delay": 0.0
+        }
+      ],
+      "off_conditions": [
+        {
+          "type": "해일정보 취소",
+          "params": {},
+          "delay": 0.0
+        }
+      ],
+      "on_actions": [],
+      "off_actions": []
+    },
+    {
+      "id": "3cfce18e",
+      "name": "긴급지진속보(예보)",
+      "type": "lower",
+      "priority": null,
+      "parent_flag_id": null,
+      "last_state_change_time": null,
+      "state": false,
+      "on_conditions": [],
+      "off_conditions": [],
+      "on_actions": [],
+      "off_actions": []
+    }
+  ]
 }
