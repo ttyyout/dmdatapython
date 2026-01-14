@@ -2358,31 +2358,99 @@ class DMDataHandler(QObject):
                 print(f"📨 DMDATA 데이터 수신 - Type: {head.get('type')}")
                 self.connection_status_changed.emit("active")
 
-                if head.get("type") == "VXSE45":
+                # 전문 타입별 처리 및 터미널 표시
+                telegram_type = head.get("type", "UNKNOWN")
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                # 전문명 매핑
+                telegram_names = {
+                    "VXSE42": "緊急地震速報配信テスト (긴급지진속보 테스트)",
+                    "VXSE44": "緊急地震速報(予報) (긴급지진속보 예보)",
+                    "VXSE45": "緊急地震速報(地震動予報) (긴급지진속보 경보)",
+                    "VZSE40": "地震·津波に関するお知らせ (지진・해일 관련 안내)",
+                    "VTSE41": "津波警報·注意報·予報 (해일 경보・주의보・예보)",
+                    "VTSE51": "津波情報 (해일 정보)",
+                    "VTSE52": "沖合の津波情報 (외해 해일 정보)",
+                    "WEPA60": "国際津波関連情報(国内向け) (국제 해일 관련 정보)",
+                    "VXSE51": "震度速報 (진도속보)",
+                    "VXSE52": "震源に関する情報 (진원정보)",
+                    "VXSE53": "震源·震度に関する情報 (진원・진도정보)",
+                    "VXSE56": "地震の活動状況等に関する情報 (지진 활동 상황 등 관련 정보)",
+                    "VXSE60": "地震回数に関する情報 (지진 횟수 관련 정보)",
+                    "VXSE61": "顕著な地震の震源要素更新のお知らせ (현저한 지진의 진원 요소 갱신 안내)",
+                    "VXSE62": "長周期地震動に関する観測情報 (장주기 지진동 관련 관측 정보)",
+                    "IXAC41": "推計震度分布図作図用データ (추정 진도 분포도 작도용 데이터)",
+                    "VYSE50": "南海トラフ地震臨時情報 (남해해구 지진 임시 정보)",
+                    "VYSE51": "南海トラフ地震関連解説情報(定例外) (남해해구 지진 관련 해설 정보 정례 외)",
+                    "VYSE52": "南海トラフ地震関連解説情報(定例) (남해해구 지진 관련 해설 정보 정례)",
+                    "VYSE60": "北海道·三陸沖後発地震注意情報 (홋카이도・산리쿠 해역 후발 지진 주의 정보)"
+                }
+                
+                telegram_name = telegram_names.get(telegram_type, f"알 수 없는 전문 ({telegram_type})")
+                
+                # 터미널에 전문 수신 표시
+                print(f"\n{'='*80}")
+                print(f"📨 [{timestamp}] DMDATA 전문 수신")
+                print(f"   코드: {telegram_type}")
+                print(f"   전문명: {telegram_name}")
+                print(f"{'='*80}\n")
+                
+                # 전문 타입별 처리
+                if telegram_type == "VXSE45":
                     print("🔥 VXSE45 (실제 긴급지진속보 - 경보) 처리 시작")
                     self.process_eew_real(head, body_data)
-                elif head.get("type") == "VXSE44":
+                elif telegram_type == "VXSE44":
                     print("🔥 VXSE44 (실제 긴급지진속보 - 예보) 처리 시작")
                     # VXSE44 (예보)는 VXSE45 (경보)와 동일한 구조로 처리
                     # 매뉴얼 기준: 緊急地震（警報）区分은 緊急地震（予報）区分에 포함
                     self.process_eew_real(head, body_data)
-                elif head.get("type") == "VXSE42":
-                    print("🧪 VXSE42 (테스트 긴급지진속보) 처리 시작")
+                elif telegram_type == "VXSE42":
+                    print("🧪 VXSE42 (테스트 긴급지진속보) 처리 시작 - 무시됨")
                     self.process_eew_test(head, body_data)
-                elif head.get("type") == "VXSE51":
+                elif telegram_type == "VXSE51":
                     print("📊 VXSE51 (진도속보) 처리 시작")
                     self.process_earthquake_info(head, body_data, "sokuhou")
-                elif head.get("type") == "VXSE52":
+                elif telegram_type == "VXSE52":
                     print("📍 VXSE52 (진원정보) 처리 시작")
                     self.process_earthquake_info(head, body_data, "epicenter")
-                elif head.get("type") == "VXSE53":
+                elif telegram_type == "VXSE53":
                     print("📋 VXSE53 (진원진도정보) 처리 시작")
                     self.process_earthquake_info(head, body_data, "detail")
-                elif head.get("type") == "VTSE41":
-                    print("🌊 VTSE41 (해일정보) 처리 시작")
+                elif telegram_type == "VTSE41":
+                    print("🌊 VTSE41 (해일 경보・주의보・예보) 처리 시작")
                     self.process_tsunami_info(head, body_data)
+                elif telegram_type == "VTSE51":
+                    print("🌊 VTSE51 (해일 정보) 처리 시작")
+                    # VTSE51은 해일 정보 (VTSE41과 다른 구조일 수 있음)
+                    self.process_tsunami_info(head, body_data)
+                elif telegram_type == "VTSE52":
+                    print("🌊 VTSE52 (외해 해일 정보) 처리 시작")
+                    # VTSE52는 외해 해일 정보
+                    self.process_tsunami_info(head, body_data)
+                elif telegram_type == "VZSE40":
+                    print("ℹ️ VZSE40 (지진・해일 관련 안내) 처리 시작")
+                    # 안내 정보는 로그만 출력
+                    print(f"   안내 내용: {json.dumps(body_data, ensure_ascii=False, indent=2)[:200]}...")
+                elif telegram_type == "WEPA60":
+                    print("🌊 WEPA60 (국제 해일 관련 정보) 처리 시작")
+                    # 국제 해일 정보는 해일정보로 처리
+                    self.process_tsunami_info(head, body_data)
+                elif telegram_type in ["VXSE56", "VXSE60", "VXSE61", "VXSE62"]:
+                    print(f"📋 {telegram_type} (지진 정보) 처리 시작")
+                    # 지진 정보는 지진상세정보로 처리
+                    self.process_earthquake_info(head, body_data, "info")
+                elif telegram_type == "IXAC41":
+                    print("📊 IXAC41 (추정 진도 분포도 작도용 데이터) 처리 시작")
+                    # 진도 분포 데이터는 로그만 출력
+                    print(f"   데이터 타입: Binary 데이터 (처리 생략)")
+                elif telegram_type in ["VYSE50", "VYSE51", "VYSE52", "VYSE60"]:
+                    print(f"📋 {telegram_type} (남해해구/후발 지진 정보) 처리 시작")
+                    # 남해해구 지진 정보는 로그만 출력 (필요시 처리 로직 추가)
+                    print(f"   정보 내용: {json.dumps(body_data, ensure_ascii=False, indent=2)[:200]}...")
                 else:
-                    print(f"ℹ️ 기타 데이터 타입: {head.get('type')}")
+                    print(f"⚠️ 미처리 전문 타입: {telegram_type}")
+                    print(f"   전문명: {telegram_name}")
+                    print(f"   Head: {json.dumps(head, ensure_ascii=False, indent=2)[:200]}...")
         except Exception as e:
             print(f"❌ 메시지 처리 오류: {e}")
             import traceback
