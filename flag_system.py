@@ -84,9 +84,9 @@ class Flag:
         self.state = False  # 오직 true/false만 가짐
         self.priority: Optional[int] = None  # 우선순위 (상위 플래그만, None=자동)
         
-        # 하위 플래그 전용: 연결된 상위 플래그 ID
-        # 하위 플래그가 켜지면 이 상위 플래그도 켜짐 (OR 집계)
-        self.target_upper_flag_id: Optional[str] = None
+        # 상위 플래그 전용: 이 상위 플래그에 포함될 하위 플래그 ID 목록
+        # 상위 플래그 상태 = OR(linked_lower_flags의 상태)
+        self.linked_lower_flags: List[str] = []
         
         # 조건들 (하위 플래그만 가짐, 상위 플래그는 조건 없음)
         # 켜짐 조건들 (OR 관계: 하나라도 만족하면 켜짐)
@@ -125,9 +125,12 @@ class Flag:
             "off_actions": [a.to_dict() for a in self.off_actions]
         }
         
-        # 하위 플래그만 조건과 target_upper_flag_id 저장
+        # 상위 플래그는 linked_lower_flags 저장
+        if self.flag_type == "upper":
+            result["linked_lower_flags"] = self.linked_lower_flags
+        
+        # 하위 플래그는 조건만 저장
         if self.flag_type == "lower":
-            result["target_upper_flag_id"] = self.target_upper_flag_id
             result["on_conditions"] = [c.to_dict() for c in self.on_conditions]
             result["off_conditions"] = [c.to_dict() for c in self.off_conditions]
         
@@ -160,15 +163,17 @@ class Flag:
         flag.last_state_change_time = data.get("last_state_change_time")
         flag.state = data.get("state", False)  # 저장된 상태 복원
         
-        # 하위 플래그만 조건과 target_upper_flag_id 로드
-        if flag.flag_type == "lower":
-            flag.target_upper_flag_id = data.get("target_upper_flag_id")
-            flag.on_conditions = [FlagCondition.from_dict(c) for c in data.get("on_conditions", [])]
-            flag.off_conditions = [FlagCondition.from_dict(c) for c in data.get("off_conditions", [])]
-        else:
+        # 상위 플래그는 linked_lower_flags 로드
+        if flag.flag_type == "upper":
+            flag.linked_lower_flags = data.get("linked_lower_flags", [])
             # 상위 플래그는 조건을 가지지 않음
             flag.on_conditions = []
             flag.off_conditions = []
+        
+        # 하위 플래그는 조건만 로드
+        if flag.flag_type == "lower":
+            flag.on_conditions = [FlagCondition.from_dict(c) for c in data.get("on_conditions", [])]
+            flag.off_conditions = [FlagCondition.from_dict(c) for c in data.get("off_conditions", [])]
         
         flag.on_actions = [FlagAction.from_dict(a) for a in data.get("on_actions", [])]
         flag.off_actions = [FlagAction.from_dict(a) for a in data.get("off_actions", [])]
@@ -218,10 +223,10 @@ class FlagSystem(QObject):
         if flag_id in self.all_flags:
             del self.all_flags[flag_id]
         
-        # 하위 플래그의 target_upper_flag_id 정리
+        # 상위 플래그의 linked_lower_flags에서 제거
         for flag in self.all_flags.values():
-            if flag.flag_type == "lower" and flag.target_upper_flag_id == flag_id:
-                flag.target_upper_flag_id = None
+            if flag.flag_type == "upper" and flag_id in flag.linked_lower_flags:
+                flag.linked_lower_flags.remove(flag_id)
     
     def get_flag(self, flag_id: str) -> Optional[Flag]:
         """플래그 가져오기"""
@@ -356,7 +361,7 @@ class FlagSystem(QObject):
         """
         상위 플래그 상태를 하위 플래그 OR 집계로 계산
         
-        규칙: 연결된 하위 플래그 중 하나라도 켜져 있으면 상위 플래그는 켜짐,
+        규칙: linked_lower_flags에 포함된 하위 플래그 중 하나라도 켜져 있으면 상위 플래그는 켜짐,
               모두 꺼져 있으면 상위 플래그는 꺼짐.
         
         Returns:
@@ -366,14 +371,15 @@ class FlagSystem(QObject):
         any_change = False
         
         for upper_flag in self.upper_flags.values():
-            # 이 상위 플래그에 연결된 하위 플래그들 찾기
-            connected_lower_flags = [
-                lower_flag for lower_flag in self.lower_flags.values()
-                if lower_flag.target_upper_flag_id == upper_flag.flag_id
+            # 이 상위 플래그에 포함된 하위 플래그들 찾기
+            linked_lower_flags = [
+                self.lower_flags[lower_flag_id]
+                for lower_flag_id in upper_flag.linked_lower_flags
+                if lower_flag_id in self.lower_flags
             ]
             
             # OR 집계: 하나라도 켜져 있으면 True
-            should_be_on = any(lower_flag.state for lower_flag in connected_lower_flags)
+            should_be_on = any(lower_flag.state for lower_flag in linked_lower_flags) if linked_lower_flags else False
             
             # 상태 변경이 필요한 경우
             if upper_flag.state != should_be_on:

@@ -108,6 +108,9 @@ class FlagSystemSettingsWindow(QDialog):
         
         # 초기 로드
         self._load_flags()
+        
+        # 상위 플래그 체크박스 딕셔너리 초기화
+        self.upper_linked_lower_checkboxes = {}
     
     def _create_conditions_tab(self, is_upper: bool) -> QWidget:
         """조건 제어 탭 생성"""
@@ -179,27 +182,46 @@ class FlagSystemSettingsWindow(QDialog):
             else:
                 self.lower_priority_combo = priority_combo
         
-        # 연결된 상위 플래그 설정 (하위 플래그만)
-        if not is_upper:
-            target_upper_layout = QHBoxLayout()
-            target_upper_layout.addWidget(QLabel("연결된 상위 플래그:"))
-            target_upper_combo = QComboBox()
-            target_upper_combo.addItem("(없음)", None)
-            for flag in self.flag_system.upper_flags.values():
-                target_upper_combo.addItem(flag.name, flag.flag_id)
-            target_upper_combo.currentIndexChanged.connect(lambda idx: self._on_target_upper_changed(target_upper_combo.itemData(idx), is_upper))
-            target_upper_layout.addWidget(target_upper_combo)
-            right_panel.addLayout(target_upper_layout)
-            self.lower_target_upper_combo = target_upper_combo
+        # 상위 플래그에 포함할 하위 플래그 선택 (상위 플래그만)
+        if is_upper:
+            linked_lower_group = QGroupBox("이 상위 플래그에 포함할 하위 플래그 선택")
+            linked_lower_layout = QVBoxLayout()
+            
+            # 스크롤 가능한 체크박스 영역
+            scroll_area = QScrollArea()
+            scroll_widget = QWidget()
+            scroll_layout = QVBoxLayout()
+            
+            # 하위 플래그 체크박스 생성
+            checkboxes_dict = {}
+            for lower_flag in self.flag_system.lower_flags.values():
+                checkbox = QCheckBox(lower_flag.name)
+                checkbox.setProperty("flag_id", lower_flag.flag_id)
+                checkbox.stateChanged.connect(lambda state, flag_id=lower_flag.flag_id: self._on_linked_lower_changed(flag_id, state == Qt.Checked))
+                scroll_layout.addWidget(checkbox)
+                checkboxes_dict[lower_flag.flag_id] = checkbox
+            
+            scroll_widget.setLayout(scroll_layout)
+            scroll_area.setWidget(scroll_widget)
+            scroll_area.setWidgetResizable(True)
+            scroll_area.setMaximumHeight(200)
+            linked_lower_layout.addWidget(scroll_area)
             
             # 설명 문구
-            target_upper_desc = QLabel(
-                "이 하위 플래그가 켜지면 연결된 상위 플래그도 자동으로 켜집니다.\n"
-                "여러 하위 플래그가 같은 상위 플래그에 연결되면, 하나라도 켜져 있으면 상위 플래그는 켜집니다."
+            linked_lower_desc = QLabel(
+                "체크된 하위 플래그 중 하나라도 켜져 있으면 이 상위 플래그는 켜집니다.\n"
+                "모든 체크된 하위 플래그가 꺼져 있으면 이 상위 플래그는 꺼집니다."
             )
-            target_upper_desc.setWordWrap(True)
-            target_upper_desc.setStyleSheet("color: #888; padding: 5px; font-size: 9pt;")
-            right_panel.addWidget(target_upper_desc)
+            linked_lower_desc.setWordWrap(True)
+            linked_lower_desc.setStyleSheet("color: #888; padding: 5px; font-size: 9pt;")
+            linked_lower_layout.addWidget(linked_lower_desc)
+            
+            linked_lower_group.setLayout(linked_lower_layout)
+            right_panel.addWidget(linked_lower_group)
+            
+            # 체크박스 딕셔너리 저장
+            if is_upper:
+                self.upper_linked_lower_checkboxes = checkboxes_dict
         
         # 조건 설정 (하위 플래그만, 상위 플래그는 조건 없음)
         if not is_upper:
@@ -244,8 +266,7 @@ class FlagSystemSettingsWindow(QDialog):
             # 상위 플래그는 조건 없음 - 안내 메시지
             info_label = QLabel(
                 "상위 플래그는 조건을 가지지 않습니다.\n"
-                "상위 플래그의 상태는 연결된 하위 플래그들의 상태를 OR 집계하여 자동으로 결정됩니다.\n"
-                "하위 플래그 탭에서 하위 플래그를 생성하고 '연결된 상위 플래그'를 설정하세요."
+                "상위 플래그의 상태는 아래에서 선택한 하위 플래그들의 상태를 OR 집계하여 자동으로 결정됩니다."
             )
             info_label.setWordWrap(True)
             info_label.setStyleSheet("background-color: #2a2a2a; padding: 15px; border-radius: 5px; color: #aaa;")
@@ -418,15 +439,10 @@ class FlagSystemSettingsWindow(QDialog):
                         if idx >= 0:
                             priority_combo.setCurrentIndex(idx)
                 
-                # 연결된 상위 플래그 설정 (하위 플래그만)
-                if not is_upper and hasattr(self, 'lower_target_upper_combo'):
-                    target_upper_combo = self.lower_target_upper_combo
-                    if flag.target_upper_flag_id:
-                        idx = target_upper_combo.findData(flag.target_upper_flag_id)
-                        if idx >= 0:
-                            target_upper_combo.setCurrentIndex(idx)
-                    else:
-                        target_upper_combo.setCurrentIndex(0)  # "(없음)"
+                # 상위 플래그에 포함된 하위 플래그 체크박스 업데이트 (상위 플래그만)
+                if is_upper and hasattr(self, 'upper_linked_lower_checkboxes'):
+                    for lower_flag_id, checkbox in self.upper_linked_lower_checkboxes.items():
+                        checkbox.setChecked(lower_flag_id in flag.linked_lower_flags)
                 
                 # 조건 목록 업데이트 (하위 플래그만)
                 if not is_upper:
@@ -481,10 +497,17 @@ class FlagSystemSettingsWindow(QDialog):
         if self.current_flag and is_upper:
             self.current_flag.priority = priority
     
-    def _on_target_upper_changed(self, target_upper_flag_id, is_upper: bool):
-        """연결된 상위 플래그 변경 (하위 플래그만)"""
-        if self.current_flag and not is_upper:
-            self.current_flag.target_upper_flag_id = target_upper_flag_id
+    def _on_linked_lower_changed(self, lower_flag_id: str, is_checked: bool):
+        """상위 플래그에 포함할 하위 플래그 변경"""
+        if not self.current_flag or self.current_flag.flag_type != "upper":
+            return
+        
+        if is_checked:
+            if lower_flag_id not in self.current_flag.linked_lower_flags:
+                self.current_flag.linked_lower_flags.append(lower_flag_id)
+        else:
+            if lower_flag_id in self.current_flag.linked_lower_flags:
+                self.current_flag.linked_lower_flags.remove(lower_flag_id)
     
     def _add_condition(self, is_upper: bool, is_on: bool):
         """조건 추가 (하위 플래그만)"""
