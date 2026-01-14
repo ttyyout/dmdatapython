@@ -198,10 +198,32 @@ class AlertBox(QWidget):
         self.warning_color = QColor("#EA3829")  # 경보: 빨간색
         self.base_bg_color = QColor("#2f4f4f")  # 기본 배경색 (진한 초록색)
         self.fg_color = QColor("#bba878")  # 텍스트 색상 (원래 색상)
+        self._is_animating = False  # 애니메이션 실행 중 플래그
         
     def set_text(self, text):
+        """텍스트 설정 및 박스 폭 자동 조절"""
         self.text = text
+        # 텍스트 길이에 따라 박스 폭 자동 계산
+        self._update_box_width_by_text()
         self.update()
+    
+    def _update_box_width_by_text(self):
+        """QFontMetrics를 사용하여 텍스트 길이에 맞게 박스 폭 자동 조절"""
+        from PySide6.QtGui import QFontMetrics
+        font = QFont("맑은 고딕", 24, QFont.Bold)
+        metrics = QFontMetrics(font)
+        
+        # 실제 텍스트 픽셀 폭 계산 (하드코딩된 폭 계산 사용 안 함)
+        text_width = metrics.horizontalAdvance(self.text)
+        padding = 40  # 좌우 여백 (20px씩)
+        target_width = text_width + padding
+        
+        # 현재 폭과 다르면 업데이트 (애니메이션 중이 아닐 때만)
+        if self.width() != target_width:
+            # 애니메이션이 실행 중이 아닐 때만 직접 폭 변경
+            # 애니메이션 중에는 애니메이션이 폭을 제어하므로 여기서는 건드리지 않음
+            if not self._is_animating:
+                self.setFixedWidth(target_width)
     
     def set_alert_type(self, alert_type):
         self.alert_type = alert_type
@@ -230,20 +252,23 @@ class AlertBox(QWidget):
         else:
             box_color = self.normal_color
         
-        # 점멸 효과 적용 (cos 기반 easing - 부드러운 호흡 효과)
+        # 점멸 효과 적용 (cos 기반 왕복 easing - 부드러운 호흡 효과)
         if self.is_blinking:
-            # cos 기반 easing 함수: (1 - cos(x)) / 2
-            # 이 함수는 시작점(x=0)과 끝점(x=π) 모두에서 기울기가 0이 되어
-            # 밝아질 때와 어두워질 때 모두 완전히 부드러운 전환을 제공합니다.
-            # sin 함수는 최저점에서 기울기가 0이 아니어서 "툭 튀는" 느낌이 있었지만,
-            # cos 기반 easing은 모든 구간에서 부드럽게 변화합니다.
-            raw_easing = (1.0 - math.cos(self._blink_opacity * math.pi)) / 2.0
+            # cos 기반 왕복 easing 함수: (1 - cos(2πt)) / 2
+            # 이 수식은 t가 0.0~1.0 범위에서 0→1→0 형태의 완전한 왕복 곡선을 만듭니다.
+            # - t=0, t=1 에서 기울기(derivative) = 0 (부드러운 시작과 끝)
+            # - t=0.5에서 최고점 도달
+            # - 반복해도 "뚝 끊기는 느낌"이 없음 (연속적인 호흡 효과)
+            # 기존 sin 기반 수식은 피크 후 바로 꺼지는 문제가 있었지만,
+            # 이 수식은 밝기 최저점에서도 다시 밝아질 때 완전히 부드럽게 전환됩니다.
+            t = self._blink_opacity  # 0.0 ~ 1.0, 기존 타이머 값 유지
+            raw_easing = (1.0 - math.cos(2 * math.pi * t)) / 2.0
             
             # 감마 보정 적용: 시각적 부드러움 강화
-            # 감마 값 1.5는 중간 밝기 구간을 더 부드럽게 만들어
+            # 감마 값 1.3은 중간 밝기 구간을 더 부드럽게 만들어
             # "숨 쉬듯 자연스러운" 점멸 효과를 구현합니다.
             # (값이 1.0보다 크면 중간 톤이 더 부드럽게 전환됨)
-            gamma_corrected = raw_easing ** 1.5
+            gamma_corrected = raw_easing ** 1.3
             
             # 기본 배경색과 박스 색상을 블렌딩
             # blend_factor는 0.0 (어두움) ~ 0.5 (밝음) 사이를 부드럽게 변화
@@ -635,6 +660,9 @@ class BroadcastWindow(QWidget):
             text_width = metrics.horizontalAdvance(self.alert_box.text)
             target_width = text_width + 40  # 좌우 여백 20px씩
             
+            # 애니메이션 시작 전 플래그 설정
+            self.alert_box._is_animating = True
+            
             # 이동 애니메이션
             self.box_animation.setStartValue(QRect(0, 0, self.width(), 50))
             self.box_animation.setEndValue(QRect(0, 0, target_width, 50))
@@ -648,6 +676,9 @@ class BroadcastWindow(QWidget):
         """박스 이동 완료 후 상세정보 표시"""
         if not self.is_testing:
             return
+        
+        # 애니메이션 완료 플래그 해제
+        self.alert_box._is_animating = False
         
         # alert_box 너비 가져오기
         alert_box_width = self.alert_box.width()
