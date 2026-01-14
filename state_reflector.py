@@ -74,11 +74,12 @@ class StateReflector(QObject):
         """
         상위 플래그 상태 반영 (중앙 winner 선택 기반)
         
-        [절대 원칙]
+        [절대 원칙 - 위반 불가]
         1. 플래그가 켜지거나 꺼질 때 OBS를 직접 제어하지 않음
         2. 현재 켜진 모든 상위 플래그를 기반으로 단일 winner 선택
-        3. winner가 있으면 winner의 on_actions만 실행
-        4. winner가 없으면 기본 상태 적용
+        3. winner 결정은 오직 decide_upper_flag_winner()만 수행
+        4. winner가 있으면 winner의 on_actions만 실행
+        5. winner가 없으면 기본 상태 적용
         
         [OFF 이벤트 처리의 절대 규칙]
         - 어떤 상위 플래그가 OFF 되더라도 OBS를 즉시 변경하지 않는다.
@@ -86,15 +87,25 @@ class StateReflector(QObject):
         - 더 높은 우선순위의 상위 플래그가 하나라도 ON 상태라면
           OBS 상태는 절대 변경되지 않는다.
         
+        [시나리오 보장]
+        - 시나리오 1: 일본 EEW 발생 → 5초 후 대만 EEW 발생 → 일본 EEW 종료
+          → 대만 EEW가 여전히 켜져 있으면 절대 기본 화면으로 돌아가지 않음
+        - 시나리오 2: EEW 없이 진도속보 → 각지진도정보 → 하위 플래그 종료
+          → 상위 맥락이 유지됨
+        
         [구조적 보장]
         - 이 함수는 플래그 상태 변화와 무관하게 항상 현재 상태를 기준으로 winner를 재계산합니다.
         - 플래그의 off_actions는 절대 즉시 실행되지 않습니다.
         - winner가 변경되었을 때만 OBS 제어가 실행됩니다.
+        - 모든 OBS 제어는 decide_upper_flag_winner()의 결과만 본다.
         """
-        # 1단계: 중앙 winner 선택 (현재 켜진 플래그 기준)
-        winner = self._select_winner()
+        # 1단계: 현재 켜진 모든 상위 플래그 수집
+        active_flags = [f for f in self.flag_system.upper_flags.values() if f.state]
         
-        # 2단계: winner가 변경되었는지 확인
+        # 2단계: [절대 봉인된 단일 결정 지점] winner 선택
+        winner = self.decide_upper_flag_winner(active_flags)
+        
+        # 3단계: winner가 변경되었는지 확인
         winner_changed = (winner is not None and self.current_winner is None) or \
                         (winner is None and self.current_winner is not None) or \
                         (winner is not None and self.current_winner is not None and 
@@ -102,29 +113,36 @@ class StateReflector(QObject):
         
         if not winner_changed and winner is not None:
             # winner가 변경되지 않았으면 스킵 (중복 실행 방지)
+            # 이 경우 더 높은 우선순위 플래그가 여전히 켜져 있음을 의미
             return
         
-        # 3단계: winner가 변경되었거나 사라졌을 때만 OBS 제어 실행
+        # 4단계: winner가 변경되었거나 사라졌을 때만 OBS 제어 실행
         if winner_changed:
             if winner:
                 # winner가 있으면 winner의 액션 실행
                 # 이전 winner의 상태는 자동으로 덮어씌워짐
+                # 더 높은 우선순위 플래그가 켜져 있으면 그 플래그가 winner가 됨
                 self._apply_winner_actions(winner)
             else:
                 # winner가 없으면 기본 상태 적용
+                # 모든 상위 플래그가 꺼졌을 때만 실행됨
                 self._apply_default_state()
         
-        # 4단계: 현재 winner 업데이트
+        # 5단계: 현재 winner 업데이트
         self.current_winner = winner
     
-    def _select_winner(self) -> Optional[Flag]:
+    def decide_upper_flag_winner(self, active_upper_flags: List[Flag]) -> Optional[Flag]:
         """
-        중앙 winner 선택 로직 - 결정적 알고리즘
+        [절대 봉인된 단일 결정 지점]
+        
+        상위 플래그 winner 결정 함수 - 이 함수만이 winner를 결정한다.
+        모든 OBS 제어는 이 함수의 결과만 본다.
         
         [절대 규칙 - 이 알고리즘은 정확히 이대로 동작해야 함]
         
-        1단계: 현재 켜진 모든 상위 플래그만 수집
-           - is_upper == true 인 플래그만 대상
+        1단계: 입력 검증
+           - active_upper_flags는 이미 상위 플래그만 포함해야 함
+           - flag_type == "upper" 인 플래그만 대상
         
         2단계: priority가 지정된 플래그와 null인 플래그를 분리
            - priority가 숫자로 지정된 플래그
@@ -147,20 +165,24 @@ class StateReflector(QObject):
         - 이 함수는 항상 동일한 입력에 대해 동일한 결과를 반환한다.
         - winner는 항상 단 하나만 선택된다.
         - 하위 플래그는 이 함수에서 절대 선택되지 않는다.
+        - 이 함수 외부에서 winner를 결정하는 코드는 존재하지 않는다.
+        
+        Args:
+            active_upper_flags: 현재 켜진 상위 플래그 목록 (state == True)
         
         Returns:
             선택된 winner 플래그, 없으면 None
         """
-        # 1단계: 현재 켜진 모든 상위 플래그만 수집
-        active_flags = [f for f in self.flag_system.upper_flags.values() if f.state]
+        # 입력 검증: 상위 플래그만 허용
+        valid_flags = [f for f in active_upper_flags if f.flag_type == "upper" and f.state]
         
-        if not active_flags:
+        if not valid_flags:
             # 켜진 상위 플래그가 없으면 None 반환
             return None
         
         # 2단계: priority가 지정된 플래그와 null인 플래그를 분리
-        priority_flags = [f for f in active_flags if f.priority is not None]
-        null_flags = [f for f in active_flags if f.priority is None]
+        priority_flags = [f for f in valid_flags if f.priority is not None]
+        null_flags = [f for f in valid_flags if f.priority is None]
         
         # 3-4단계: winner 결정
         if priority_flags:
@@ -178,13 +200,33 @@ class StateReflector(QObject):
             null_flags.sort(key=lambda f: f.last_state_change_time if f.last_state_change_time else 0, reverse=True)
             return null_flags[0] if null_flags else None
     
+    def _select_winner(self) -> Optional[Flag]:
+        """
+        [레거시 래퍼 - 내부적으로 decide_upper_flag_winner() 호출]
+        
+        이 함수는 decide_upper_flag_winner()를 호출하는 래퍼일 뿐이다.
+        실제 결정 로직은 decide_upper_flag_winner()에 있다.
+        """
+        # 현재 켜진 모든 상위 플래그만 수집
+        active_flags = [f for f in self.flag_system.upper_flags.values() if f.state]
+        
+        # 단일 결정 지점 호출
+        return self.decide_upper_flag_winner(active_flags)
+    
     def _apply_winner_actions(self, winner: Flag):
         """
         winner의 액션을 OBS에 적용
         
+        [절대 원칙]
+        - 오직 winner의 on_actions만 실행
+        - winner의 off_actions는 절대 실행되지 않음
+        - 다른 플래그의 액션은 절대 실행되지 않음
+        
         각 리소스(장면/녹화/버퍼)별로 winner의 액션만 실행
         """
         # winner의 모든 on_actions 실행
+        # winner가 변경되었을 때만 호출되므로, 더 높은 우선순위 플래그가
+        # 켜져 있으면 그 플래그가 winner가 되어 이 함수가 호출됨
         for action in winner.on_actions:
             self._execute_upper_action(action, winner)
     
@@ -192,10 +234,18 @@ class StateReflector(QObject):
         """
         기본 상태 적용 (winner가 없을 때)
         
-        현재는 아무것도 하지 않지만, 필요시 기본 장면으로 전환 등의 로직 추가 가능
+        [절대 규칙]
+        - 모든 상위 플래그가 꺼졌을 때만 실행됨
+        - 더 높은 우선순위 플래그가 켜져 있으면 절대 실행되지 않음
+        
+        [시나리오 보장]
+        - 일본 EEW 종료 → 대만 EEW가 여전히 켜져 있으면 이 함수는 실행되지 않음
+        - 모든 상위 플래그가 꺼졌을 때만 기본 상태로 복귀
         """
         # 기본 상태 적용 로직 (필요시 구현)
         # 예: self.obs_controller.switch_scene(self.default_scene)
+        # 현재는 아무것도 하지 않음 (기본 상태 유지)
+        print(f"ℹ️ [상태 반영] 모든 상위 플래그가 꺼짐 → 기본 상태 유지")
         pass
     
     def _resolve_conflict(self, conflicting_flags: List[Flag]) -> Optional[Flag]:

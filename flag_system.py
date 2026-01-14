@@ -101,12 +101,23 @@ class Flag:
         self.last_state_change_time: Optional[float] = None
     
     def to_dict(self):
+        """
+        플래그를 JSON 직렬화 가능한 딕셔너리로 변환
+        
+        [완전 결정적 구조]
+        - priority: 명시적으로 저장 (None이면 null로 저장)
+        - last_state_change_time: winner 결정에 필요한 정보 저장
+        - type: "upper" 또는 "lower" 명시
+        - 모든 필수 정보 포함하여 winner 결정이 가능하도록 보장
+        """
         return {
             "id": self.flag_id,
             "name": self.name,
-            "type": self.flag_type,
-            "priority": self.priority,
+            "type": self.flag_type,  # "upper" 또는 "lower" 명시
+            "priority": self.priority,  # None이면 null로 저장 (명시적)
             "parent_flag_id": self.parent_flag_id,
+            "last_state_change_time": self.last_state_change_time,  # winner 결정에 필수
+            "state": self.state,  # 현재 상태도 저장 (로드 시 복원)
             "on_conditions": [c.to_dict() for c in self.on_conditions],
             "off_conditions": [c.to_dict() for c in self.off_conditions],
             "on_actions": [a.to_dict() for a in self.on_actions],
@@ -115,13 +126,32 @@ class Flag:
     
     @classmethod
     def from_dict(cls, data: Dict):
+        """
+        JSON 딕셔너리에서 플래그 복원
+        
+        [완전 결정적 복원]
+        - priority: 명시적으로 로드 (null이면 None)
+        - last_state_change_time: winner 결정에 필요한 정보 복원
+        - state: 저장된 상태 복원
+        - 모든 필수 정보를 복원하여 winner 결정이 가능하도록 보장
+        """
         flag = cls(
             data.get("id", ""),
             data.get("name", ""),
-            data.get("type", "upper")
+            data.get("type", "upper")  # "is_upper" 레거시 필드도 지원
         )
-        flag.priority = data.get("priority")
+        # 레거시 "is_upper" 필드 지원
+        if "is_upper" in data:
+            flag.flag_type = "upper" if data.get("is_upper") else "lower"
+        
+        # priority 명시적 로드 (null이면 None)
+        priority_value = data.get("priority")
+        flag.priority = priority_value if priority_value is not None else None
+        
         flag.parent_flag_id = data.get("parent_flag_id")
+        flag.last_state_change_time = data.get("last_state_change_time")
+        flag.state = data.get("state", False)  # 저장된 상태 복원
+        
         flag.on_conditions = [FlagCondition.from_dict(c) for c in data.get("on_conditions", [])]
         flag.off_conditions = [FlagCondition.from_dict(c) for c in data.get("off_conditions", [])]
         flag.on_actions = [FlagAction.from_dict(a) for a in data.get("on_actions", [])]
@@ -479,9 +509,28 @@ class FlagSystem(QObject):
         # 상태 안정화는 타이머가 담당 (즉시 평가하지 않음)
     
     def save_config(self):
-        """설정 저장"""
+        """
+        설정 저장 - 완전 결정적 JSON 구조
+        
+        [JSON 구조 보장]
+        - 모든 상위 플래그에 priority 명시적 저장 (None이면 null)
+        - last_state_change_time 저장 (winner 결정에 필수)
+        - state 저장 (현재 상태 복원)
+        - winner 결정 규칙 메타데이터 포함
+        """
         try:
             config = {
+                # 메타데이터: winner 결정 규칙 명시
+                "metadata": {
+                    "version": "2.0",
+                    "winner_decision_rules": {
+                        "priority_rule": "숫자가 낮을수록 우선순위가 높다 (1 < 2 < 3 < ...)",
+                        "null_priority_rule": "priority가 null인 플래그는 모든 숫자 priority보다 항상 낮다",
+                        "tie_breaker_rule": "동일 priority면 마지막으로 켜진 플래그 선택",
+                        "auto_priority_rule": "priority가 모두 null이면 가장 최근에 켜진 플래그 선택"
+                    },
+                    "note": "이 JSON만으로 winner 결정이 100% 가능해야 함"
+                },
                 "upper_flags": [f.to_dict() for f in self.upper_flags.values()],
                 "lower_flags": [f.to_dict() for f in self.lower_flags.values()]
             }
