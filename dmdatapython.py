@@ -2017,25 +2017,6 @@ class OBSController:
         # 하단 글자 스크롤 소스 상태 추적 (토글용)
         self.scroll_source_states = {}  # {f"{scene_name}_{item_id}": visible}
         
-        # 워크플로우 단축키 매핑 (워크플로우 분석 결과)
-        # 각 단축키는 OBS WebSocket으로 소스/필터 제어로 변환 필요
-        self.hotkey_actions = {
-            "ctrl+1": "최종보",  # EEW Final
-            "ctrl+2": "예보전환",  # EEW New (예보)
-            "ctrl+3": "경보전환",  # EEW NewWarning
-            "ctrl+4": "취소보",  # EEW Cancel
-            "ctrl+q": "진원정보",  # EarthquakeInformation Epicenter
-            "ctrl+w": "진도속보",  # EarthquakeInformation Sokuhou
-            "ctrl+i": "진원진도정보",  # EarthquakeInformation Detail
-            "ctrl+u": "해일정보갱신",  # TsunamiInformation
-            "ctrl+y": "해일정보에의한진원정보갱신",  # EarthquakeInformation Tsunami
-            "ctrl+t": "현저한지진의진원요소갱신",  # EarthquakeInformation UpdateEpicenter
-            "ctrl+r": "장주기지진동관측정보",  # EarthquakeInformation Lpgm
-            "ctrl+,": "녹화",  # Recording Start
-            "ctrl+/": "녹화중지",  # Recording Stop
-            "ctrl+.": "버퍼저장"  # Replay Buffer Save
-        }
-        
         # 초기 연결 시도
         if self.use_websocket:
             self.connect_websocket()
@@ -2063,7 +2044,7 @@ class OBSController:
             print("   다음 명령어로 설치하세요: pip install obs-websocket-py")
             return False
         except Exception as e:
-            print(f"⚠️ OBS WebSocket 연결 실패: {e}. 단축키 방식만 사용합니다.")
+            print(f"⚠️ OBS WebSocket 연결 실패: {e}")
             return False
     
     def get_scene_list(self):
@@ -2249,122 +2230,6 @@ class OBSController:
         # EventStateManager에서 워크플로우를 실행하도록 변경됨
         pass
     
-    def _trigger_hotkey_action(self, hotkey, auto_hide_seconds=None, scene_name=None):
-        """단축키 액션 트리거 - OBS WebSocket으로 소스/필터 제어
-        
-        Args:
-            hotkey: 단축키 문자열
-            auto_hide_seconds: 자동 숨김 시간 (초), None이면 자동 숨김 없음
-            scene_name: 장면 이름 (None이면 기본값 "일본" 사용)
-        """
-        if not self.connected or not self.obs_ws:
-            if not self.connect_websocket():
-                return
-        
-        try:
-            try:
-                from obswebsocket import requests as obs_requests
-            except ImportError:
-                from obs_websocket_py import requests as obs_requests
-            
-            # 장면 이름 결정 (기본값: "일본")
-            if scene_name is None:
-                scene_name = "일본"
-            
-            # 각 단축키에 따른 소스 아이템 제어 (hotkeys 분석 결과)
-            if hotkey == "ctrl+1":
-                # 최종보: show 1, 17, 30 / hide 34, 74, 82, 83, 84
-                self._set_scene_item_visible(scene_name, 1, True)
-                self._set_scene_item_visible(scene_name, 17, True)  # 긴급지진속보 글자
-                self._set_scene_item_visible(scene_name, 30, True)  # (예보)
-                self._set_scene_item_visible(scene_name, 34, False)  # 긴급지진속보 취소
-                self._set_scene_item_visible(scene_name, 74, False)  # 발표
-                self._set_scene_item_visible(scene_name, 82, False)  # 예보그라데이션
-                self._set_scene_item_visible(scene_name, 83, False)  # 경보그라데이션
-                self._set_scene_item_visible(scene_name, 84, False)  # 취소그라데이션
-            elif hotkey == "ctrl+2":
-                # 예보전환: show 82, 30, 74 / hide 1, 34, 82, 83, 84
-                self._set_scene_item_visible(scene_name, 82, True)  # 예보그라데이션
-                self._set_scene_item_visible(scene_name, 30, True)  # (예보)
-                self._set_scene_item_visible(scene_name, 74, True)  # 발표
-                self._set_scene_item_visible(scene_name, 1, False)
-                self._set_scene_item_visible(scene_name, 34, False)  # 긴급지진속보 취소
-                self._set_scene_item_visible(scene_name, 83, False)  # 경보그라데이션
-                self._set_scene_item_visible(scene_name, 84, False)  # 취소그라데이션
-            elif hotkey == "ctrl+3":
-                # 경보전환: show 83, 74, 35 / hide 30, 34, 82, 83, 84
-                self._set_scene_item_visible(scene_name, 83, True)  # 경보그라데이션
-                self._set_scene_item_visible(scene_name, 74, True)  # 발표
-                self._set_scene_item_visible(scene_name, 35, True)  # (경보)
-                self._set_scene_item_visible(scene_name, 30, False)  # (예보)
-                self._set_scene_item_visible(scene_name, 34, False)  # 긴급지진속보 취소
-                self._set_scene_item_visible(scene_name, 82, False)  # 예보그라데이션
-                self._set_scene_item_visible(scene_name, 84, False)  # 취소그라데이션
-            elif hotkey == "ctrl+4":
-                # 취소보: show 84, 34 / hide 34, 74, 82, 83, 84
-                self._set_scene_item_visible(scene_name, 84, True)  # 취소그라데이션
-                self._set_scene_item_visible(scene_name, 34, True)  # 긴급지진속보 취소
-                self._set_scene_item_visible(scene_name, 74, False)  # 발표
-                self._set_scene_item_visible(scene_name, 82, False)  # 예보그라데이션
-                self._set_scene_item_visible(scene_name, 83, False)  # 경보그라데이션
-            elif hotkey == "ctrl+q":
-                # 진원정보: hide 34, 17, 30, 35
-                self._set_scene_item_visible(scene_name, 34, False)  # 긴급지진속보 취소
-                self._set_scene_item_visible(scene_name, 17, False)  # 긴급지진속보 글자
-                self._set_scene_item_visible(scene_name, 30, False)  # (예보)
-                self._set_scene_item_visible(scene_name, 35, False)  # (경보)
-                # 진원정보 소스 토글 표시 (id: 47)
-                self._toggle_scroll_source(scene_name, 47, auto_hide_seconds)
-            elif hotkey == "ctrl+w":
-                # 진도속보: hide 34, 17, 30
-                self._set_scene_item_visible(scene_name, 34, False)  # 긴급지진속보 취소
-                self._set_scene_item_visible(scene_name, 17, False)  # 긴급지진속보 글자
-                self._set_scene_item_visible(scene_name, 30, False)  # (예보)
-                # 진도속보 소스 토글 표시 (id: 40)
-                self._toggle_scroll_source(scene_name, 40, auto_hide_seconds)
-            elif hotkey == "ctrl+i":
-                # 진원진도정보: hide 34, 17, 30, 35
-                self._set_scene_item_visible(scene_name, 34, False)  # 긴급지진속보 취소
-                self._set_scene_item_visible(scene_name, 17, False)  # 긴급지진속보 글자
-                self._set_scene_item_visible(scene_name, 30, False)  # (예보)
-                self._set_scene_item_visible(scene_name, 35, False)  # (경보)
-                # 진원진도정보 소스 토글 표시 (id: 48)
-                self._toggle_scroll_source(scene_name, 48, auto_hide_seconds)
-            elif hotkey == "ctrl+u":
-                # 해일정보갱신: 해일 장면으로 전환 또는 해일 소스 표시
-                # 해일 장면으로 전환
-                self.switch_scene("해일")
-            elif hotkey == "ctrl+y":
-                # 해일정보에의한진원정보갱신: 해일정보 소스 토글 표시 (id: 51)
-                self._toggle_scroll_source(scene_name, 51, auto_hide_seconds)
-            elif hotkey == "ctrl+t":
-                # 현저한지진의진원요소갱신: 현저한지진 소스 토글 표시 (id: 50)
-                self._toggle_scroll_source(scene_name, 50, auto_hide_seconds)
-            elif hotkey == "ctrl+r":
-                # 장주기지진동관측정보: 장주기 소스 토글 표시 (id: 49)
-                self._toggle_scroll_source(scene_name, 49, auto_hide_seconds)
-            elif hotkey == "ctrl+,":
-                # 녹화 시작
-                request = obs_requests.StartRecord()
-                self.obs_ws.call(request)
-                print(f"✅ 녹화 시작")
-            elif hotkey == "ctrl+/":
-                # 녹화 중지
-                request = obs_requests.StopRecord()
-                self.obs_ws.call(request)
-                print(f"✅ 녹화 중지")
-            elif hotkey == "ctrl+.":
-                # 버퍼 저장
-                request = obs_requests.SaveReplayBuffer()
-                self.obs_ws.call(request)
-                print(f"✅ 버퍼 저장")
-            
-            print(f"🔧 OBS 액션 트리거: {hotkey} ({self.hotkey_actions.get(hotkey, '알 수 없음')})")
-        except Exception as e:
-            print(f"❌ OBS 액션 트리거 실패: {e}")
-            import traceback
-            traceback.print_exc()
-    
     def _set_scene_item_visible(self, scene_name, item_id, visible):
         """장면 아이템 표시/숨김 설정"""
         try:
@@ -2494,7 +2359,12 @@ class DMDataHandler(QObject):
                 self.connection_status_changed.emit("active")
 
                 if head.get("type") == "VXSE45":
-                    print("🔥 VXSE45 (실제 긴급지진속보) 처리 시작")
+                    print("🔥 VXSE45 (실제 긴급지진속보 - 경보) 처리 시작")
+                    self.process_eew_real(head, body_data)
+                elif head.get("type") == "VXSE44":
+                    print("🔥 VXSE44 (실제 긴급지진속보 - 예보) 처리 시작")
+                    # VXSE44 (예보)는 VXSE45 (경보)와 동일한 구조로 처리
+                    # 매뉴얼 기준: 緊急地震（警報）区分은 緊急地震（予報）区分에 포함
                     self.process_eew_real(head, body_data)
                 elif head.get("type") == "VXSE42":
                     print("🧪 VXSE42 (테스트 긴급지진속보) 처리 시작")
@@ -2623,9 +2493,21 @@ class DMDataHandler(QObject):
         self.detail_window.update_status("최종보 수신 - 3분 후 대기중으로 복귀", "normal")
 
     def process_eew_real(self, head, body):
-        """실제 긴급지진속보 처리 (VXSE45)"""
+        """
+        실제 긴급지진속보 처리 (VXSE45)
+        
+        DMDATA 매뉴얼 참고: https://dmdata.jp/docs/manual/earthquake/
+        VXSE45 전문 구조:
+        - eventId: 이벤트 ID
+        - serialNo: 시리얼 번호
+        - body.isWarning: 경보 여부 (true=경보, false=예보)
+        - body.isCanceled: 취소 여부
+        - body.isLastInfo: 최종보 여부
+        - body.earthquake: 지진 정보 (hypocenter, magnitude 등)
+        - body.intensity: 진도 정보
+        """
         try:
-            print(f"📋 실제 EEW 데이터 수신 (VXSE45)")
+            print(f"📋 [VXSE45] 실제 EEW 데이터 수신")
 
             processed_body = body
             if isinstance(body, str):
@@ -2644,6 +2526,10 @@ class DMDataHandler(QObject):
             event_id = processed_body.get("eventId", head.get("eventId", "UNKNOWN"))
             serial_no = processed_body.get("serialNo", "-")
             body_main = processed_body.get("body", {})
+            
+            # 구조 로깅 (디버깅용)
+            print(f"   - Event ID: {event_id}, Serial No: {serial_no}")
+            print(f"   - Body 구조 키: {list(body_main.keys())}")
 
             is_warning = body_main.get("isWarning", False)
             is_canceled = body_main.get("isCanceled", False)
@@ -2729,8 +2615,21 @@ class DMDataHandler(QObject):
             print(f"❌ 테스트 EEW 처리 오류: {e}")
     
     def process_earthquake_info(self, head, body, report_type):
-        """지진상세정보 처리 (VXSE51, VXSE52, VXSE53)"""
+        """
+        지진상세정보 처리 (VXSE51, VXSE52, VXSE53)
+        
+        DMDATA 매뉴얼 참고: https://dmdata.jp/docs/manual/
+        - VXSE51: 震度速報 (진도속보)
+        - VXSE52: 震源に関する情報 (진원정보)
+        - VXSE53: 震源・震度に関する情報 (진원진도정보)
+        
+        전문 구조:
+        - body.earthquakes[]: 지진 정보 배열
+        - body.tsunami: 해일정보 (있는 경우)
+        - body.lpgm: 장주기지진동 정보 (있는 경우)
+        """
         try:
+            print(f"📋 [{head.get('type', 'UNKNOWN')}] 지진상세정보 처리 시작 (타입: {report_type})")
             processed_body = body
             if isinstance(body, str):
                 try:
@@ -2769,10 +2668,27 @@ class DMDataHandler(QObject):
             
             # 해일정보 포함 여부 확인 (body에서 확인)
             body_main = processed_body.get("body", {})
-            has_tsunami = "tsunami" in body_main or len(body_main.get("tsunami", {}).get("forecasts", [])) > 0
+            
+            # 상세 로깅
+            print(f"   - Body 구조 키: {list(body_main.keys())}")
+            
+            # 해일정보 확인
+            tsunami = body_main.get("tsunami", {})
+            has_tsunami = bool(tsunami) and len(tsunami.get("forecasts", [])) > 0
+            if tsunami:
+                forecasts = tsunami.get("forecasts", [])
+                print(f"   - 해일정보 포함: {has_tsunami} (forecasts 개수: {len(forecasts)})")
+                if forecasts:
+                    for i, forecast in enumerate(forecasts[:2]):  # 최대 2개만 출력
+                        grade = forecast.get("grade", "N/A")
+                        print(f"     - Forecast[{i}]: Grade={grade}")
+            else:
+                print(f"   - 해일정보 없음")
             
             # 장주기지진동 정보 포함 여부 확인
             has_lpgm = "lpgm" in body_main or "longPeriodGroundMotion" in body_main
+            if has_lpgm:
+                print(f"   - 장주기지진동 정보 포함: {has_lpgm}")
             
             # 이벤트 상태 관리자에 상세정보 처리
             state_manager.handle_report(
@@ -2792,7 +2708,16 @@ class DMDataHandler(QObject):
             traceback.print_exc()
     
     def process_tsunami_info(self, head, body):
-        """해일정보 처리 (VTSE41)"""
+        """
+        해일정보 처리 (VTSE41)
+        
+        DMDATA 매뉴얼 참고: https://dmdata.jp/docs/manual/tsunami/
+        VTSE41 전문 구조:
+        - body.earthquakes[]: 관련 지진 정보 배열
+        - body.tsunami.forecasts[]: 해일 예보 배열
+          - 각 forecast는 지역별 해일 경보/주의보/예보 정보 포함
+          - forecasts가 비어있으면 모든 해일 경보/주의보/예보가 해제된 상태
+        """
         try:
             processed_body = body
             if isinstance(body, str):
@@ -2800,12 +2725,18 @@ class DMDataHandler(QObject):
                     compressed_data = base64.b64decode(body)
                     decompressed_data = gzip.decompress(compressed_data)
                     processed_body = json.loads(decompressed_data.decode('utf-8'))
+                    print(f"✅ 해일정보 압축 해제 성공")
                 except Exception as decode_error:
                     print(f"❌ BODY 압축 해제 실패: {decode_error}")
                     processed_body = {}
             
             if not isinstance(processed_body, dict):
                 processed_body = {}
+            
+            # 전체 구조 로깅 (디버깅용)
+            print(f"🌊 [VTSE41] 해일정보 전문 수신")
+            print(f"   - Head: {json.dumps(head, ensure_ascii=False, indent=2)[:200]}...")
+            print(f"   - Body 구조 키: {list(processed_body.keys())}")
             
             # Event ID 추출
             body_main = processed_body.get("body", {})
@@ -2814,15 +2745,38 @@ class DMDataHandler(QObject):
             # 해일정보는 관련 지진의 Event ID 사용
             if earthquakes and len(earthquakes) > 0:
                 event_id = earthquakes[0].get("eventId") or head.get("eventId") or f"TS_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                print(f"   - 관련 지진 Event ID: {earthquakes[0].get('eventId')}")
             else:
                 event_id = head.get("eventId") or f"TS_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                print(f"   - Head에서 Event ID 추출: {head.get('eventId')}")
             
             # 해일정보 해제 여부 확인
+            # DMDATA VTSE41 전문 구조 (매뉴얼 기준):
+            # - body.tsunami.forecasts: 해일 예보 배열
+            #   - 각 forecast는 지역별 해일 경보/주의보/예보 정보
+            #   - forecasts가 비어있으면 모든 해일 경보/주의보/예보가 해제된 상태
             tsunami = body_main.get("tsunami", {})
             forecasts = tsunami.get("forecasts", [])
-            is_canceled = len(forecasts) == 0  # 예보가 없으면 해제로 간주
             
-            print(f"🌊 해일정보 수신: Event ID: {event_id}, 해제: {is_canceled}")
+            # 해일정보 발표/해제 판단
+            # 매뉴얼 기준: forecasts 배열이 비어있으면 해제, 있으면 발표
+            is_canceled = len(forecasts) == 0
+            
+            # 상세 로깅
+            print(f"   - Event ID: {event_id}")
+            print(f"   - Tsunami 객체 키: {list(tsunami.keys())}")
+            print(f"   - Forecasts 개수: {len(forecasts)}")
+            if forecasts:
+                print(f"   - 첫 번째 예보 구조: {json.dumps(forecasts[0], ensure_ascii=False, indent=2)[:300]}...")
+                # 각 예보의 grade 확인 (Major Tsunami Warning, Tsunami Warning, Tsunami Advisory 등)
+                for i, forecast in enumerate(forecasts[:3]):  # 최대 3개만 출력
+                    grade = forecast.get("grade", "N/A")
+                    area = forecast.get("area", {}).get("name", "N/A")
+                    print(f"   - Forecast[{i}]: Grade={grade}, Area={area}")
+            else:
+                print(f"   - ⚠️ Forecasts 배열이 비어있음 → 해일정보 해제로 판단")
+            
+            print(f"   - 최종 판단: {'해제' if is_canceled else '발표'}")
             
             # 이벤트 상태 관리자에 해일정보 처리
             state_manager = self.detail_window.get_event_state_manager()
