@@ -2172,18 +2172,23 @@ class OBSController:
                 for scene in scenes:
                     scene_name = scene['name']
                     try:
-                        items = self.get_scene_items(scene_name)
+                        # 그룹 내부까지 포함하여 모든 소스 가져오기
+                        items = self.get_scene_items(scene_name, include_groups=True)
                         if items:
-                            print(f"  - {scene_name}: {len(items)}개 소스")
+                            print(f"  - {scene_name}: {len(items)}개 소스 (그룹 내부 포함)")
                             
                             # 각 소스의 필터 목록도 미리 로드
                             for item in items:
                                 source_name = item.get('sourceName', '')
+                                depth = item.get('depth', 0)
+                                is_group = item.get('isGroup', False)
                                 if source_name:
+                                    indent = "  " * depth
+                                    prefix = "📁 " if is_group else "  "
                                     try:
                                         filters = self.get_source_filter_list(source_name)
                                         if filters:
-                                            print(f"    - {source_name}: {len(filters)}개 필터")
+                                            print(f"    {indent}{prefix}{source_name}: {len(filters)}개 필터")
                                     except Exception as e:
                                         # 필터 로드 실패는 무시 (일부 소스는 필터가 없을 수 있음)
                                         pass
@@ -2221,8 +2226,17 @@ class OBSController:
             print(f"❌ 장면 목록 가져오기 실패: {e}")
             return []
     
-    def get_scene_items(self, scene_name):
-        """특정 장면의 소스 아이템 목록 가져오기"""
+    def get_scene_items(self, scene_name, include_groups=True):
+        """특정 장면의 소스 아이템 목록 가져오기 (그룹 내부 포함)
+        
+        Args:
+            scene_name: 장면 이름
+            include_groups: True면 그룹 내부도 재귀적으로 탐색, False면 최상위만 반환
+        
+        Returns:
+            리스트 형태: [{'itemId': ..., 'sourceName': ..., 'depth': 0, ...}, ...]
+            depth는 트리 깊이 (0=최상위, 1=그룹 내부, 2=그룹 내부의 그룹 내부, ...)
+        """
         if not self.connected or not self.obs_ws:
             if not self.connect_websocket():
                 return []
@@ -2233,21 +2247,108 @@ class OBSController:
             except ImportError:
                 from obs_websocket_py import requests as obs_requests
             
+            # 최상위 아이템 가져오기
             response = self.obs_ws.call(obs_requests.GetSceneItemList(sceneName=scene_name))
             items = []
             if hasattr(response, 'datain') and 'sceneItems' in response.datain:
                 for item in response.datain['sceneItems']:
-                    items.append({
+                    item_data = {
                         'itemId': item.get('sceneItemId', 0),
                         'sourceName': item.get('sourceName', ''),
                         'sourceType': item.get('sourceType', ''),
                         'inputKind': item.get('inputKind', ''),
                         'isGroup': item.get('isGroup', False),
-                        'enabled': item.get('sceneItemEnabled', True)
-                    })
+                        'enabled': item.get('sceneItemEnabled', True),
+                        'depth': 0  # 최상위는 depth 0
+                    }
+                    items.append(item_data)
+                    
+                    # 그룹인 경우 내부 아이템 재귀적으로 탐색
+                    if include_groups and item_data['isGroup']:
+                        group_items = self._get_group_items_recursive(
+                            item_data['sourceName'], 
+                            parent_scene_name=scene_name,
+                            depth=1
+                        )
+                        items.extend(group_items)
+            
             return items
         except Exception as e:
             print(f"❌ 장면 아이템 목록 가져오기 실패: {e}")
+            return []
+    
+    def _get_group_items_recursive(self, group_name, parent_scene_name=None, depth=1):
+        """그룹 내부의 아이템 목록을 재귀적으로 가져오기
+        
+        Args:
+            group_name: 그룹 이름 (sourceName)
+            parent_scene_name: 그룹이 속한 씬 이름 (없으면 group_name 사용)
+            depth: 현재 깊이 (0부터 시작, 재귀 호출 시 증가)
+        
+        Returns:
+            그룹 내부의 모든 아이템 리스트 (depth 정보 포함)
+        """
+        if not self.connected or not self.obs_ws:
+            return []
+        
+        try:
+            try:
+                from obswebsocket import requests as obs_requests
+            except ImportError:
+                from obs_websocket_py import requests as obs_requests
+            
+            # GetGroupSceneItemList로 그룹 내부 아이템 가져오기
+            # obs-websocket v5: GetGroupSceneItemList(sceneName, groupName)
+            # group_name은 그룹의 sourceName
+            # parent_scene_name이 없으면 group_name을 sceneName으로 사용 (그룹은 독립적인 씬처럼 동작)
+            scene_name = parent_scene_name if parent_scene_name else group_name
+            
+            response = None
+            try:
+                # v5 API: GetGroupSceneItemList(sceneName, groupName)
+                response = self.obs_ws.call(obs_requests.GetGroupSceneItemList(sceneName=scene_name, groupName=group_name))
+            except TypeError:
+                # 일부 버전에서는 groupName만 필요할 수 있음
+                try:
+                    response = self.obs_ws.call(obs_requests.GetGroupSceneItemList(groupName=group_name))
+                except Exception as e2:
+                    # 다른 형태 시도: sceneName만
+                    try:
+                        response = self.obs_ws.call(obs_requests.GetGroupSceneItemList(sceneName=group_name))
+                    except Exception as e3:
+                        print(f"⚠️ GetGroupSceneItemList 호출 실패: {e3}")
+                        return []
+            
+            items = []
+            
+            if response and hasattr(response, 'datain') and 'sceneItems' in response.datain:
+                for item in response.datain['sceneItems']:
+                    item_data = {
+                        'itemId': item.get('sceneItemId', 0),
+                        'sourceName': item.get('sourceName', ''),
+                        'sourceType': item.get('sourceType', ''),
+                        'inputKind': item.get('inputKind', ''),
+                        'isGroup': item.get('isGroup', False),
+                        'enabled': item.get('sceneItemEnabled', True),
+                        'depth': depth,  # 현재 깊이
+                        'parentGroup': group_name  # 부모 그룹 이름
+                    }
+                    items.append(item_data)
+                    
+                    # 또 다른 그룹이면 재귀적으로 탐색
+                    if item_data['isGroup']:
+                        nested_items = self._get_group_items_recursive(
+                            item_data['sourceName'], 
+                            parent_scene_name=scene_name,
+                            depth=depth + 1
+                        )
+                        items.extend(nested_items)
+            
+            return items
+        except Exception as e:
+            print(f"⚠️ 그룹 '{group_name}' 내부 아이템 가져오기 실패: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def switch_scene(self, scene_name):

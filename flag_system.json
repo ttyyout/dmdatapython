@@ -173,6 +173,18 @@
       "off_actions": [],
       "on_conditions": [],
       "off_conditions": []
+    },
+    {
+      "id": "d5eea76c",
+      "name": "새 플래그 6",
+      "type": "lower",
+      "priority": null,
+      "last_state_change_time": null,
+      "state": false,
+      "on_actions": [],
+      "off_actions": [],
+      "on_conditions": [],
+      "off_conditions": []
     }
   ]
 }

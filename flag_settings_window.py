@@ -31,6 +31,10 @@ class FlagSystemSettingsWindow(QDialog):
         self.current_instance_type = None
         self.current_active_config = None
         
+        # 각 탭의 플래그 목록 추적
+        self.upper_conditions_flag_list = None
+        self.lower_conditions_flag_list = None
+        
         self.setWindowTitle("플래그 시스템 설정")
         self.resize(1200, 800)
         
@@ -144,6 +148,12 @@ class FlagSystemSettingsWindow(QDialog):
         flag_list = QListWidget()
         flag_list.currentItemChanged.connect(lambda: self._on_flag_selected(flag_list, is_upper))
         left_panel.addWidget(flag_list)
+        
+        # 각 탭의 플래그 목록 저장
+        if is_upper:
+            self.upper_conditions_flag_list = flag_list
+        else:
+            self.lower_conditions_flag_list = flag_list
         
         flag_buttons = QHBoxLayout()
         add_btn = QPushButton("추가")
@@ -390,23 +400,38 @@ class FlagSystemSettingsWindow(QDialog):
     def _load_flags(self):
         """플래그 목록 로드"""
         # 상위 플래그
-        self.upper_flag_list.clear()
-        for flag in self.flag_system.upper_flags.values():
-            self.upper_flag_list.addItem(flag.name)
+        if hasattr(self, 'upper_flag_list') and self.upper_flag_list:
+            self.upper_flag_list.clear()
+            for flag in self.flag_system.upper_flags.values():
+                self.upper_flag_list.addItem(flag.name)
         
         # 하위 플래그
-        self.lower_flag_list.clear()
-        for flag in self.flag_system.lower_flags.values():
-            self.lower_flag_list.addItem(flag.name)
+        if hasattr(self, 'lower_flag_list') and self.lower_flag_list:
+            self.lower_flag_list.clear()
+            for flag in self.flag_system.lower_flags.values():
+                self.lower_flag_list.addItem(flag.name)
+        
+        # 조건 탭의 플래그 목록도 업데이트
+        if hasattr(self, 'upper_conditions_flag_list') and self.upper_conditions_flag_list:
+            self.upper_conditions_flag_list.clear()
+            for flag in self.flag_system.upper_flags.values():
+                self.upper_conditions_flag_list.addItem(flag.name)
+        
+        if hasattr(self, 'lower_conditions_flag_list') and self.lower_conditions_flag_list:
+            self.lower_conditions_flag_list.clear()
+            for flag in self.flag_system.lower_flags.values():
+                self.lower_conditions_flag_list.addItem(flag.name)
         
         # 동작 탭용 플래그 목록도 동일하게
-        self.upper_action_flag_list.clear()
-        for flag in self.flag_system.upper_flags.values():
-            self.upper_action_flag_list.addItem(flag.name)
+        if hasattr(self, 'upper_action_flag_list') and self.upper_action_flag_list:
+            self.upper_action_flag_list.clear()
+            for flag in self.flag_system.upper_flags.values():
+                self.upper_action_flag_list.addItem(flag.name)
         
-        self.lower_action_flag_list.clear()
-        for flag in self.flag_system.lower_flags.values():
-            self.lower_action_flag_list.addItem(flag.name)
+        if hasattr(self, 'lower_action_flag_list') and self.lower_action_flag_list:
+            self.lower_action_flag_list.clear()
+            for flag in self.flag_system.lower_flags.values():
+                self.lower_action_flag_list.addItem(flag.name)
     
     def _add_flag(self, is_upper: bool):
         """플래그 추가"""
@@ -436,12 +461,31 @@ class FlagSystemSettingsWindow(QDialog):
                 self.flag_system.remove_flag(flag_id)
                 break
         
+        if not deleted_flag_id:
+            return  # 플래그를 찾지 못한 경우
+        
         # 삭제된 플래그가 현재 선택된 플래그인 경우 초기화
         if self.current_flag and self.current_flag.flag_id == deleted_flag_id:
             self.current_flag = None
         
-        # 목록 새로고침
+        # 모든 플래그 목록 새로고침
         self._load_flags()
+        
+        # 조건 탭의 플래그 목록도 직접 새로고침
+        if is_upper and self.upper_conditions_flag_list:
+            self.upper_conditions_flag_list.clear()
+            for flag in self.flag_system.upper_flags.values():
+                self.upper_conditions_flag_list.addItem(flag.name)
+        elif not is_upper and self.lower_conditions_flag_list:
+            self.lower_conditions_flag_list.clear()
+            for flag in self.flag_system.lower_flags.values():
+                self.lower_conditions_flag_list.addItem(flag.name)
+        
+        # 전달받은 flag_list도 새로고침
+        flag_list.clear()
+        flags_dict = self.flag_system.upper_flags if is_upper else self.flag_system.lower_flags
+        for flag in flags_dict.values():
+            flag_list.addItem(flag.name)
         
         # 선택 해제
         flag_list.clearSelection()
@@ -453,6 +497,11 @@ class FlagSystemSettingsWindow(QDialog):
             if hasattr(self, 'upper_linked_active_checkboxes'):
                 for checkbox in self.upper_linked_active_checkboxes.values():
                     checkbox.setChecked(False)
+            # 조건 목록 초기화
+            if hasattr(self, 'upper_on_conditions_list') and self.upper_on_conditions_list:
+                self.upper_on_conditions_list.clear()
+            if hasattr(self, 'upper_off_conditions_list') and self.upper_off_conditions_list:
+                self.upper_off_conditions_list.clear()
         else:
             if hasattr(self, 'lower_on_conditions_list'):
                 self.lower_on_conditions_list.clear()
