@@ -133,28 +133,28 @@ class ActionDialog(QDialog):
             find_none_action()
     
     def _build_action_tree(self, is_upper: bool):
-        """동작 트리 구조 구성 - 실제 OBS 대상 포함"""
+        """동작 트리 구조 구성 - 동작 타입만 표시 (실제 대상은 파라미터에서 선택)"""
         self.action_type_tree.clear()
         
-        # 동작 그룹 정의
+        # 동작 그룹 정의 (동작 타입만)
         if is_upper:
             # 상위 플래그 동작
             action_groups = {
-                "None": [("아무 것도 하지 않기", None, None)],
-                "Scene": [("장면 전환", "scene", None)],
-                "Recording": [("녹화 시작", "recording", "start"), ("녹화 중지", "recording", "stop")],
-                "Buffer": [("버퍼 저장", "buffer", None)]
+                "None": ["아무 것도 하지 않기"],
+                "Scene": ["장면 전환"],
+                "Recording": ["녹화 시작", "녹화 중지"],
+                "Buffer": ["버퍼 저장"]
             }
         else:
             # 하위 플래그 동작
             action_groups = {
-                "None": [("아무 것도 하지 않기", None, None)],
-                "Source": [("소스 표시", "source", "show"), ("소스 숨김", "source", "hide")],
-                "Filter": [("필터 활성화", "filter", "enable"), ("필터 비활성화", "filter", "disable")]
+                "None": ["아무 것도 하지 않기"],
+                "Source": ["소스 표시", "소스 숨김"],
+                "Filter": ["필터 활성화", "필터 비활성화"]
             }
         
-        # 트리 아이템 생성
-        for group_name, actions in action_groups.items():
+        # 트리 아이템 생성 (동작 타입만)
+        for group_name, action_types in action_groups.items():
             # 그룹 노드
             group_item = QTreeWidgetItem()
             group_item.setText(0, group_name)
@@ -162,115 +162,12 @@ class ActionDialog(QDialog):
             group_item.setData(0, Qt.UserRole + 1, True)  # is_group = True
             self.action_type_tree.addTopLevelItem(group_item)
             
-            # OBS 데이터 기반 실제 대상 추가
-            if group_name == "Scene" and self.obs_controller:
-                # 실제 장면 목록 추가
-                try:
-                    scenes = self.obs_controller.get_scene_list()
-                    for scene in scenes:
-                        scene_name = scene.get('name', '')
-                        if scene_name:
-                            for action_display, target_kind, action_subtype in actions:
-                                scene_item = QTreeWidgetItem(group_item)
-                                scene_item.setText(0, f"{scene_name}")
-                                # 메타데이터 저장
-                                scene_item.setData(0, Qt.UserRole, action_display)  # action_type
-                                scene_item.setData(0, Qt.UserRole + 1, False)  # is_group = False
-                                scene_item.setData(0, Qt.UserRole + 2, scene_name)  # target_name
-                                scene_item.setData(0, Qt.UserRole + 3, target_kind)  # target_kind (scene)
-                                scene_item.setData(0, Qt.UserRole + 4, action_subtype)  # action_subtype
-                except Exception as e:
-                    print(f"⚠️ 장면 목록 로드 실패: {e}")
-            
-            elif group_name == "Source" and self.obs_controller:
-                # 실제 소스 목록 추가
-                try:
-                    scenes = self.obs_controller.get_scene_list()
-                    all_sources = set()
-                    source_to_scene = {}  # {source_name: [scene_names]}
-                    
-                    for scene in scenes:
-                        scene_name = scene.get('name', '')
-                        if scene_name:
-                            try:
-                                items = self.obs_controller.get_scene_items(scene_name, include_groups=True)
-                                for item in items:
-                                    source_name = item.get('sourceName', '')
-                                    if source_name:
-                                        all_sources.add(source_name)
-                                        if source_name not in source_to_scene:
-                                            source_to_scene[source_name] = []
-                                        source_to_scene[source_name].append(scene_name)
-                            except:
-                                pass
-                    
-                    for source_name in sorted(all_sources):
-                        for action_display, target_kind, action_subtype in actions:
-                            source_item = QTreeWidgetItem(group_item)
-                            source_item.setText(0, f"{source_name}")
-                            # 메타데이터 저장
-                            source_item.setData(0, Qt.UserRole, action_display)  # action_type
-                            source_item.setData(0, Qt.UserRole + 1, False)  # is_group = False
-                            source_item.setData(0, Qt.UserRole + 2, source_name)  # target_name
-                            source_item.setData(0, Qt.UserRole + 3, target_kind)  # target_kind (source)
-                            source_item.setData(0, Qt.UserRole + 4, action_subtype)  # action_subtype
-                            source_item.setData(0, Qt.UserRole + 5, source_to_scene.get(source_name, []))  # 가능한 장면 목록
-                except Exception as e:
-                    print(f"⚠️ 소스 목록 로드 실패: {e}")
-            
-            elif group_name == "Filter" and self.obs_controller:
-                # 실제 필터 목록 추가 (소스별)
-                try:
-                    scenes = self.obs_controller.get_scene_list()
-                    source_filters = {}  # {source_name: [filter_names]}
-                    
-                    for scene in scenes:
-                        scene_name = scene.get('name', '')
-                        if scene_name:
-                            try:
-                                items = self.obs_controller.get_scene_items(scene_name, include_groups=True)
-                                for item in items:
-                                    source_name = item.get('sourceName', '')
-                                    if source_name:
-                                        try:
-                                            filters = self.obs_controller.get_source_filter_list(source_name)
-                                            if source_name not in source_filters:
-                                                source_filters[source_name] = set()
-                                            for filter_data in filters:
-                                                filter_name = filter_data.get('name', '')
-                                                if filter_name:
-                                                    source_filters[source_name].add(filter_name)
-                                        except:
-                                            pass
-                            except:
-                                pass
-                    
-                    for source_name in sorted(source_filters.keys()):
-                        filter_names = sorted(source_filters[source_name])
-                        for filter_name in filter_names:
-                            for action_display, target_kind, action_subtype in actions:
-                                filter_item = QTreeWidgetItem(group_item)
-                                filter_item.setText(0, f"{source_name} / {filter_name}")
-                                # 메타데이터 저장
-                                filter_item.setData(0, Qt.UserRole, action_display)  # action_type
-                                filter_item.setData(0, Qt.UserRole + 1, False)  # is_group = False
-                                filter_item.setData(0, Qt.UserRole + 2, filter_name)  # target_name (filter name)
-                                filter_item.setData(0, Qt.UserRole + 3, target_kind)  # target_kind (filter)
-                                filter_item.setData(0, Qt.UserRole + 4, action_subtype)  # action_subtype
-                                filter_item.setData(0, Qt.UserRole + 5, source_name)  # source_name
-                except Exception as e:
-                    print(f"⚠️ 필터 목록 로드 실패: {e}")
-            
-            else:
-                # None, Recording, Buffer 그룹은 기존대로
-                for action_display, target_kind, action_subtype in actions:
-                    action_item = QTreeWidgetItem(group_item)
-                    action_item.setText(0, action_display)
-                    action_item.setData(0, Qt.UserRole, action_display)  # action_type 저장
-                    action_item.setData(0, Qt.UserRole + 1, False)  # is_group = False
-                    action_item.setData(0, Qt.UserRole + 2, None)  # target_name
-                    action_item.setData(0, Qt.UserRole + 3, target_kind)  # target_kind
-                    action_item.setData(0, Qt.UserRole + 4, action_subtype)  # action_subtype
+            # 하위 동작 노드 (leaf) - 동작 타입만
+            for action_type in action_types:
+                action_item = QTreeWidgetItem(group_item)
+                action_item.setText(0, action_type)
+                action_item.setData(0, Qt.UserRole, action_type)  # action_type 저장
+                action_item.setData(0, Qt.UserRole + 1, False)  # is_group = False
         
         # 모든 그룹 펼치기
         self.action_type_tree.expandAll()
@@ -288,11 +185,8 @@ class ActionDialog(QDialog):
             return
         
         action_type = current_item.data(0, Qt.UserRole)
-        target_name = current_item.data(0, Qt.UserRole + 2)
-        target_kind = current_item.data(0, Qt.UserRole + 3)
-        
         if action_type:
-            self._on_type_changed(action_type, target_name, target_kind, current_item)
+            self._on_type_changed(action_type)
     
     def _on_tree_action_selected(self, item, column):
         """트리에서 동작 더블클릭 시"""
@@ -302,24 +196,18 @@ class ActionDialog(QDialog):
             return
         
         action_type = item.data(0, Qt.UserRole)
-        target_name = item.data(0, Qt.UserRole + 2)
-        target_kind = item.data(0, Qt.UserRole + 3)
-        
         if action_type:
-            self._on_type_changed(action_type, target_name, target_kind, item)
+            self._on_type_changed(action_type)
     
-    def _on_type_changed(self, action_type: str = None, target_name: str = None, target_kind: str = None, tree_item = None):
-        """동작 타입 변경 시 파라미터 UI 업데이트 - 트리에서 선택한 대상 정보 사용"""
+    def _on_type_changed(self, action_type: str = None):
+        """동작 타입 변경 시 파라미터 UI 업데이트 - 실제 대상은 파라미터에서 선택"""
         # action_type이 제공되지 않으면 트리에서 가져오기
-        if action_type is None or tree_item is None:
+        if action_type is None:
             current_item = self.action_type_tree.currentItem()
             if current_item:
                 is_group = current_item.data(0, Qt.UserRole + 1)
                 if not is_group:
                     action_type = current_item.data(0, Qt.UserRole)
-                    target_name = current_item.data(0, Qt.UserRole + 2)
-                    target_kind = current_item.data(0, Qt.UserRole + 3)
-                    tree_item = current_item
                 else:
                     action_type = None
         
@@ -339,13 +227,7 @@ class ActionDialog(QDialog):
                 child.widget().deleteLater()
         self.param_widgets.clear()
         
-        # 트리에서 선택한 대상 정보가 있으면 자동으로 파라미터 설정
-        if action_type == "장면 전환" and target_name:
-            # 트리에서 선택한 장면 사용
-            params_label = QLabel(f"선택된 장면: {target_name}")
-            self.params_layout.addRow("장면:", params_label)
-            self.param_widgets["scene_name"] = target_name
-        elif action_type == "장면 전환":
+        if action_type == "장면 전환":
             # 장면 선택
             scene_combo = QComboBox()
             scene_combo.addItems(["일반", "일본", "해일"])
@@ -362,55 +244,22 @@ class ActionDialog(QDialog):
             self.param_widgets["scene_name"] = scene_combo
         
         elif action_type in ["소스 표시", "소스 숨김"]:
-            # 트리에서 선택한 소스 정보가 있으면 자동으로 파라미터 설정
-            if target_name and target_kind == "source":
-                # 트리에서 선택한 소스 사용
-                source_name = target_name
-                possible_scenes = tree_item.data(0, Qt.UserRole + 5) if tree_item else []
-                
-                params_label = QLabel(f"선택된 소스: {source_name}")
-                self.params_layout.addRow("소스:", params_label)
-                self.param_widgets["source_name"] = source_name
-                
-                # 가능한 장면이 있으면 첫 번째 장면 사용
-                if possible_scenes:
-                    scene_name = possible_scenes[0]
-                    scene_label = QLabel(f"장면: {scene_name}")
-                    self.params_layout.addRow("장면:", scene_label)
-                    self.param_widgets["scene_name"] = scene_name
-                else:
-                    # 장면 선택
-                    scene_combo = QComboBox()
-                    scene_combo.addItem("(선택 없음)", "")
-                    scene_combo.addItems(["일반", "일본", "해일"])
-                    if self.obs_controller:
-                        try:
-                            scenes = self.obs_controller.get_scene_list()
-                            for scene in scenes:
-                                scene_name = scene.get('name', '')
-                                if scene_name:
-                                    scene_combo.addItem(scene_name, scene_name)
-                        except:
-                            pass
-                    self.params_layout.addRow("장면:", scene_combo)
-                    self.param_widgets["scene_name"] = scene_combo
-            else:
-                # 기존 방식: 장면 선택 후 소스 선택
-                scene_combo = QComboBox()
-                scene_combo.addItem("(선택 없음)", "")
-                scene_combo.addItems(["일반", "일본", "해일"])
-                if self.obs_controller:
-                    try:
-                        scenes = self.obs_controller.get_scene_list()
-                        for scene in scenes:
-                            scene_name = scene.get('name', '')
-                            if scene_name:
-                                scene_combo.addItem(scene_name, scene_name)
-                    except:
-                        pass
-                scene_combo.currentTextChanged.connect(self._on_scene_changed_for_source)
-                self.params_layout.addRow("장면:", scene_combo)
-                self.param_widgets["scene_name"] = scene_combo
+            # 장면 선택
+            scene_combo = QComboBox()
+            scene_combo.addItem("(선택 없음)", "")
+            scene_combo.addItems(["일반", "일본", "해일"])
+            if self.obs_controller:
+                try:
+                    scenes = self.obs_controller.get_scene_list()
+                    for scene in scenes:
+                        scene_name = scene.get('name', '')
+                        if scene_name:
+                            scene_combo.addItem(scene_name, scene_name)
+                except:
+                    pass
+            scene_combo.currentTextChanged.connect(self._on_scene_changed_for_source)
+            self.params_layout.addRow("장면:", scene_combo)
+            self.param_widgets["scene_name"] = scene_combo
             
             # 소스 선택 (트리 구조)
             source_tree = QTreeWidget()
@@ -662,33 +511,17 @@ class ActionDialog(QDialog):
         if action_type == "아무 것도 하지 않기":
             return FlagAction("아무 것도 하지 않기", {})
         
-        # 트리에서 선택한 대상 정보 가져오기
-        target_name = current_item.data(0, Qt.UserRole + 2)
-        target_kind = current_item.data(0, Qt.UserRole + 3)
-        
         # 파라미터 수집
         if "scene_name" in self.param_widgets:
             scene_widget = self.param_widgets["scene_name"]
-            if isinstance(scene_widget, str):
-                # 트리에서 선택한 장면 (문자열)
-                params["scene_name"] = scene_widget
-            elif isinstance(scene_widget, QComboBox):
-                # 콤보박스에서 선택한 장면
+            if isinstance(scene_widget, QComboBox):
                 scene_name = scene_widget.currentText()
                 if scene_name and scene_name != "(선택 없음)":
                     params["scene_name"] = scene_name
         
         if "source_name" in self.param_widgets:
             source_widget = self.param_widgets["source_name"]
-            if isinstance(source_widget, str):
-                # 트리에서 선택한 소스 (문자열)
-                params["source_name"] = source_widget
-                # scene_name도 함께 설정
-                if "scene_name" in self.param_widgets:
-                    scene_widget = self.param_widgets["scene_name"]
-                    if isinstance(scene_widget, str):
-                        params["scene_name"] = scene_widget
-            elif isinstance(source_widget, QComboBox):
+            if isinstance(source_widget, QComboBox):
                 source_data = source_widget.currentData()
                 if source_data:
                     params["source_name"] = source_data
@@ -698,9 +531,7 @@ class ActionDialog(QDialog):
             scene_name = ""
             if "scene_name" in self.param_widgets:
                 scene_widget = self.param_widgets["scene_name"]
-                if isinstance(scene_widget, str):
-                    scene_name = scene_widget
-                elif isinstance(scene_widget, QComboBox):
+                if isinstance(scene_widget, QComboBox):
                     scene_name = scene_widget.currentText()
             
             # QTreeWidget인 경우
@@ -749,10 +580,7 @@ class ActionDialog(QDialog):
         
         if "filter_name" in self.param_widgets:
             filter_widget = self.param_widgets["filter_name"]
-            if isinstance(filter_widget, str):
-                # 트리에서 선택한 필터 (문자열)
-                params["filter_name"] = filter_widget
-            elif isinstance(filter_widget, QComboBox):
+            if isinstance(filter_widget, QComboBox):
                 filter_combo = filter_widget
                 filter_data = filter_combo.currentData()
                 if filter_data:
