@@ -449,6 +449,7 @@ class FlagSystemSettingsWindow(QDialog):
         """플래그 삭제 - 단일 진입점으로 모든 UI 동기화"""
         current_item = flag_list.currentItem()
         if not current_item:
+            print("⚠️ 삭제할 플래그가 선택되지 않았습니다.")
             return
         
         flag_name = current_item.text()
@@ -461,10 +462,19 @@ class FlagSystemSettingsWindow(QDialog):
                 break
         
         if not deleted_flag_id:
+            print(f"⚠️ 플래그를 찾지 못했습니다: {flag_name}")
             return  # 플래그를 찾지 못한 경우
         
-        # 단일 진입점: flag_system.remove_flag() 호출
+        print(f"🗑️ 플래그 삭제 중: {flag_name} (ID: {deleted_flag_id})")
+        
+        # 단일 진입점: flag_system.remove_flag() 직접 호출
         self.flag_system.remove_flag(deleted_flag_id)
+        
+        # 삭제 확인
+        if deleted_flag_id in self.flag_system.upper_flags or deleted_flag_id in self.flag_system.lower_flags:
+            print(f"❌ 플래그 삭제 실패: {deleted_flag_id}가 여전히 존재합니다.")
+        else:
+            print(f"✅ 플래그 삭제 완료: {deleted_flag_id}")
         
         # 삭제된 플래그가 현재 선택된 플래그인 경우 초기화
         if self.current_flag and self.current_flag.flag_id == deleted_flag_id:
@@ -475,6 +485,8 @@ class FlagSystemSettingsWindow(QDialog):
     
     def _refresh_all_ui_after_flag_deletion(self, is_upper: bool, deleted_flag_id: str):
         """플래그 삭제 후 모든 탭 UI 새로고침"""
+        print(f"🔄 UI 새로고침 시작: is_upper={is_upper}, deleted_flag_id={deleted_flag_id}")
+        
         # 모든 플래그 목록 새로고침
         self._load_flags()
         
@@ -485,12 +497,14 @@ class FlagSystemSettingsWindow(QDialog):
                 for flag in self.flag_system.upper_flags.values():
                     self.upper_conditions_flag_list.addItem(flag.name)
                 self.upper_conditions_flag_list.clearSelection()
+                print(f"✅ 상위 플래그 조건 탭 목록 새로고침 완료: {len(self.flag_system.upper_flags)}개")
         else:
             if hasattr(self, 'lower_conditions_flag_list') and self.lower_conditions_flag_list:
                 self.lower_conditions_flag_list.clear()
                 for flag in self.flag_system.lower_flags.values():
                     self.lower_conditions_flag_list.addItem(flag.name)
                 self.lower_conditions_flag_list.clearSelection()
+                print(f"✅ 하위 플래그 조건 탭 목록 새로고침 완료: {len(self.flag_system.lower_flags)}개")
         
         # 조건 UI 초기화
         if is_upper:
@@ -518,6 +532,8 @@ class FlagSystemSettingsWindow(QDialog):
                 self.lower_on_conditions_list.clear()
             if hasattr(self, 'lower_off_conditions_list') and self.lower_off_conditions_list:
                 self.lower_off_conditions_list.clear()
+        
+        print("✅ UI 새로고침 완료")
     
     def _on_flag_selected(self, flag_list: QListWidget, is_upper: bool):
         """플래그 선택 시 - 방어 코드 추가"""
