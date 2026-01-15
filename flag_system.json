@@ -67,12 +67,35 @@
       "state": false,
       "on_actions": [],
       "off_actions": [],
-      "on_conditions": [],
+      "on_conditions": [
+        {
+          "type": "EEW 신규 발표",
+          "params": {
+            "announcement_types": [
+              "신규 발표"
+            ],
+            "intensity_filter": "필터 없음"
+          },
+          "delay": 0.0
+        }
+      ],
       "off_conditions": []
     },
     {
       "id": "4e9c56cf",
-      "name": "새 플래그 3",
+      "name": "긴급지진속보(경보)",
+      "type": "lower",
+      "priority": null,
+      "last_state_change_time": null,
+      "state": false,
+      "on_actions": [],
+      "off_actions": [],
+      "on_conditions": [],
+      "off_conditions": []
+    },
+    {
+      "id": "bec59413",
+      "name": "일본지진",
       "type": "lower",
       "priority": null,
       "last_state_change_time": null,

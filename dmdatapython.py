@@ -24,6 +24,15 @@ except ImportError as e:
     FlagCondition = None
     FlagAction = None
 
+# 인스턴스 시스템 import
+try:
+    from instance_system import InstanceSystem, InstanceTypeConfig, EarthquakeActiveConfig
+except ImportError as e:
+    print(f"⚠️ 인스턴스 시스템 모듈을 불러올 수 없습니다: {e}")
+    InstanceSystem = None
+    InstanceTypeConfig = None
+    EarthquakeActiveConfig = None
+
 # ------------------ 번역 사전 로더 ------------------
 
 class EpicenterTranslator:
@@ -329,7 +338,12 @@ class DetailBox(QWidget):
 class BroadcastWindow(QWidget):
     def __init__(self):
         super().__init__()
+        self.event_state_manager = None  # 테스트 모드와 실제 발생 모드 통일을 위해
         self.setWindowTitle("방송용 창")
+    
+    def set_event_state_manager(self, event_state_manager):
+        """EventStateManager 설정 (테스트 모드와 실제 발생 모드 통일)"""
+        self.event_state_manager = event_state_manager
         self.setFixedSize(1920, 50)
         self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowCloseButtonHint)
         self.bg_color = QColor("#2f4f4f")
@@ -417,10 +431,23 @@ class BroadcastWindow(QWidget):
             self.test_eew_alert(is_warning=True)
     
     def test_eew_alert(self, is_warning=False):
-        """테스트용 EEW 알림"""
+        """테스트용 EEW 알림 - 실제 발생 모드와 동일한 코드 경로 사용"""
         test_event_id = f"TEST_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        test_info_text = "테스트용 지진 정보입니다. 이것은 긴급지진속보 테스트 메시지입니다."
         
+        # EventStateManager를 통해 이벤트 전달 (실제 발생 모드와 동일)
+        if self.event_state_manager:
+            # 실제 발생 모드와 동일하게 EventStateManager.handle_eew 호출
+            self.event_state_manager.handle_eew(
+                event_id=test_event_id,
+                serial_no=1,
+                is_final=False,
+                is_warning=is_warning,
+                is_canceled=False,
+                source="TEST"
+            )
+        
+        # UI 업데이트 (실제 발생 모드와 동일한 방식)
+        test_info_text = "테스트용 지진 정보입니다. 이것은 긴급지진속보 테스트 메시지입니다."
         self.start_eew_alert(
             test_info_text,
             event_id=test_event_id,
@@ -1082,10 +1109,23 @@ class DetailWindow(QWidget):
         self.obs_controller = OBSController(use_websocket=True)
         self.event_state_manager.set_obs_controller(self.obs_controller)
         
-        # 플래그 시스템 초기화
+        # 인스턴스 시스템 초기화 (플래그 시스템보다 먼저)
+        try:
+            if InstanceSystem:
+                self.instance_system = InstanceSystem()
+                # EventStateManager에 인스턴스 시스템 연결
+                self.event_state_manager.set_instance_system(self.instance_system)
+            else:
+                self.instance_system = None
+                print("⚠️ 인스턴스 시스템을 사용할 수 없습니다.")
+        except Exception as e:
+            self.instance_system = None
+            print(f"⚠️ 인스턴스 시스템 초기화 실패: {e}")
+        
+        # 플래그 시스템 초기화 (인스턴스 시스템과 연결)
         try:
             if FlagSystem:
-                self.flag_system = FlagSystem()
+                self.flag_system = FlagSystem(self.instance_system)
                 # EventStateManager에 플래그 시스템 연결
                 self.event_state_manager.set_flag_system(self.flag_system)
                 
@@ -1354,25 +1394,40 @@ class DetailWindow(QWidget):
     def open_flag_system_settings(self):
         """플래그 시스템 설정 창 열기"""
         if not hasattr(self, 'flag_system') or not self.flag_system:
-            # 플래그 시스템 초기화
-            try:
-                if FlagSystem:
-                    self.flag_system = FlagSystem()
-                    self.event_state_manager.set_flag_system(self.flag_system)
-                    
-                    # 상태 반영기 초기화
-                    from state_reflector import StateReflector
-                    self.state_reflector = StateReflector(self.flag_system, self.obs_controller)
-                else:
-                    print("❌ 플래그 시스템을 사용할 수 없습니다.")
+            # 인스턴스 시스템 초기화 (없으면 생성)
+            if not hasattr(self, 'instance_system') or not self.instance_system:
+                try:
+                    if InstanceSystem:
+                        self.instance_system = InstanceSystem()
+                        self.event_state_manager.set_instance_system(self.instance_system)
+                    else:
+                        print("❌ 인스턴스 시스템을 사용할 수 없습니다.")
+                        return
+                except Exception as e:
+                    print(f"❌ 인스턴스 시스템 초기화 실패: {e}")
                     return
-            except Exception as e:
-                print(f"❌ 플래그 시스템 초기화 실패: {e}")
-                return
+            
+            # 플래그 시스템 초기화 (없으면 생성)
+            if not hasattr(self, 'flag_system') or not self.flag_system:
+                try:
+                    if FlagSystem:
+                        self.flag_system = FlagSystem(self.instance_system)
+                        self.event_state_manager.set_flag_system(self.flag_system)
+                        
+                        # 상태 반영기 초기화
+                        from state_reflector import StateReflector
+                        self.state_reflector = StateReflector(self.flag_system, self.obs_controller)
+                    else:
+                        print("❌ 플래그 시스템을 사용할 수 없습니다.")
+                        return
+                except Exception as e:
+                    print(f"❌ 플래그 시스템 초기화 실패: {e}")
+                    return
         
         try:
             from flag_settings_window import FlagSystemSettingsWindow
-            settings_window = FlagSystemSettingsWindow(self.flag_system, self.obs_controller, self)
+            instance_system = getattr(self, 'instance_system', None)
+            settings_window = FlagSystemSettingsWindow(self.flag_system, self.obs_controller, instance_system, self)
             settings_window.exec()
         except ImportError as e:
             print(f"❌ 플래그 설정 창을 불러올 수 없습니다: {e}")
@@ -1518,6 +1573,10 @@ class EventStateManager(QObject):
             # 워크플로우는 상태만 변경하고, 장면 재계산은 주기적 타이머가 담당
             self.workflow_engine = WorkflowEngine(self._handle_workflow_event_fact)
     
+    def set_instance_system(self, instance_system):
+        """인스턴스 시스템 설정"""
+        self.instance_system = instance_system
+    
     def set_flag_system(self, flag_system):
         """플래그 시스템 설정"""
         self.flag_system = flag_system
@@ -1560,7 +1619,17 @@ class EventStateManager(QObject):
             fact_type = 'TSUNAMI_CANCELED' if is_canceled else 'TSUNAMI_RECEIVED'
             self.workflow_engine.trigger_event_fact(fact_type, event_data)
         
-        # 플래그 시스템에 이벤트 트리거
+        # 인스턴스 시스템에 이벤트 트리거 (우선)
+        if hasattr(self, 'instance_system') and self.instance_system:
+            event_data = {
+                'event_id': event_id,
+                'is_canceled': is_canceled,
+                'source': source
+            }
+            fact_type = 'TSUNAMI_CANCELED' if is_canceled else 'TSUNAMI_RECEIVED'
+            self.instance_system.trigger_event(fact_type, event_data)
+        
+        # 플래그 시스템에 이벤트 트리거 (하위 플래그 조건 평가용)
         if hasattr(self, 'flag_system') and self.flag_system:
             event_data = {
                 'event_id': event_id,
@@ -1683,6 +1752,52 @@ class EventStateManager(QObject):
             
             if fact_type:
                 self.workflow_engine.trigger_event_fact(fact_type, event_data)
+        
+        # 인스턴스 시스템에 이벤트 트리거 (우선)
+        if hasattr(self, 'instance_system') and self.instance_system:
+            event_data = {
+                'event_id': event_id,
+                'report_type': report_type,
+                'is_update_epicenter': is_update_epicenter,
+                'has_tsunami': has_tsunami,
+                'has_lpgm': has_lpgm,
+                'source': source
+            }
+            
+            if report_type == "sokuhou":
+                fact_type = 'SOKUHOU_RECEIVED'
+            elif report_type == "epicenter":
+                fact_type = 'EPICENTER_RECEIVED'
+            elif report_type == "detail":
+                fact_type = 'DETAIL_RECEIVED'
+            else:
+                fact_type = None
+            
+            if fact_type:
+                self.instance_system.trigger_event(fact_type, event_data)
+        
+        # 플래그 시스템에 이벤트 트리거 (하위 플래그 조건 평가용)
+        if hasattr(self, 'flag_system') and self.flag_system:
+            event_data = {
+                'event_id': event_id,
+                'report_type': report_type,
+                'is_update_epicenter': is_update_epicenter,
+                'has_tsunami': has_tsunami,
+                'has_lpgm': has_lpgm,
+                'source': source
+            }
+            
+            if report_type == "sokuhou":
+                fact_type = 'SOKUHOU_RECEIVED'
+            elif report_type == "epicenter":
+                fact_type = 'EPICENTER_RECEIVED'
+            elif report_type == "detail":
+                fact_type = 'DETAIL_RECEIVED'
+            else:
+                fact_type = None
+            
+            if fact_type:
+                self.flag_system.trigger_event(fact_type, event_data)
         
         # 상태만 업데이트
         self.update_global_flags()
@@ -4259,7 +4374,14 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     detail_win = DetailWindow()
+    # DetailWindow에서 BroadcastWindow를 생성하도록 변경 필요
+    # 임시로 event_state_manager 없이 생성 (나중에 DetailWindow에서 생성)
     broadcast_win = BroadcastWindow()
+    
+    # DetailWindow 생성 후 event_state_manager 연결
+    detail_win = DetailWindow()
+    if detail_win.event_state_manager:
+        broadcast_win.set_event_state_manager(detail_win.event_state_manager)
 
     dmdata_handler = DMDataHandler(broadcast_win, detail_win)
     exptech_handler = ExpTechHandler(broadcast_win, detail_win)

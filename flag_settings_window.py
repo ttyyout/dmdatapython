@@ -12,14 +12,24 @@ from PySide6.QtGui import QFont
 from flag_system import FlagSystem, Flag, FlagCondition, FlagAction
 from PySide6.QtWidgets import QDialog as QDialogBase
 
+try:
+    from instance_system import InstanceSystem, InstanceTypeConfig, EarthquakeActiveConfig
+except ImportError:
+    InstanceSystem = None
+    InstanceTypeConfig = None
+    EarthquakeActiveConfig = None
+
 class FlagSystemSettingsWindow(QDialog):
     """플래그 시스템 설정 창"""
     
-    def __init__(self, flag_system: FlagSystem, obs_controller, parent=None):
+    def __init__(self, flag_system: FlagSystem, obs_controller, instance_system=None, parent=None):
         super().__init__(parent)
         self.flag_system = flag_system
         self.obs_controller = obs_controller
+        self.instance_system = instance_system
         self.current_flag = None
+        self.current_instance_type = None
+        self.current_active_config = None
         
         self.setWindowTitle("플래그 시스템 설정")
         self.resize(1200, 800)
@@ -80,19 +90,29 @@ class FlagSystemSettingsWindow(QDialog):
         # 탭 위젯
         self.tab_widget = QTabWidget()
         
-        # 탭 1: 상위 플래그 조건 제어
+        # 탭 1: 지진 이벤트 설정 (인스턴스 종류)
+        if self.instance_system:
+            self.instance_types_tab = self._create_instance_types_tab()
+            self.tab_widget.addTab(self.instance_types_tab, "지진 이벤트 설정")
+        
+        # 탭 2: EARTHQUAKE_ACTIVE 설정
+        if self.instance_system:
+            self.active_configs_tab = self._create_active_configs_tab()
+            self.tab_widget.addTab(self.active_configs_tab, "EARTHQUAKE_ACTIVE 설정")
+        
+        # 탭 3: 상위 플래그 조건 제어
         self.upper_conditions_tab = self._create_conditions_tab(is_upper=True)
         self.tab_widget.addTab(self.upper_conditions_tab, "상위 플래그 조건")
         
-        # 탭 2: 하위 플래그 조건 제어
+        # 탭 4: 하위 플래그 조건 제어
         self.lower_conditions_tab = self._create_conditions_tab(is_upper=False)
         self.tab_widget.addTab(self.lower_conditions_tab, "하위 플래그 조건")
         
-        # 탭 3: 상위 플래그 동작 제어
+        # 탭 5: 상위 플래그 동작 제어
         self.upper_actions_tab = self._create_actions_tab(is_upper=True)
         self.tab_widget.addTab(self.upper_actions_tab, "상위 플래그 동작")
         
-        # 탭 4: 하위 플래그 동작 제어
+        # 탭 6: 하위 플래그 동작 제어
         self.lower_actions_tab = self._create_actions_tab(is_upper=False)
         self.tab_widget.addTab(self.lower_actions_tab, "하위 플래그 동작")
         
@@ -439,7 +459,12 @@ class FlagSystemSettingsWindow(QDialog):
                         if idx >= 0:
                             priority_combo.setCurrentIndex(idx)
                 
-                # 상위 플래그에 포함된 하위 플래그 체크박스 업데이트 (상위 플래그만)
+                # 상위 플래그: EARTHQUAKE_ACTIVE 체크박스 업데이트
+                if is_upper and hasattr(self, 'upper_linked_active_checkboxes'):
+                    for active_id, checkbox in self.upper_linked_active_checkboxes.items():
+                        checkbox.setChecked(active_id in flag.linked_active_ids)
+                
+                # 상위 플래그: 하위 플래그 체크박스 업데이트 (레거시)
                 if is_upper and hasattr(self, 'upper_linked_lower_checkboxes'):
                     for lower_flag_id, checkbox in self.upper_linked_lower_checkboxes.items():
                         checkbox.setChecked(lower_flag_id in flag.linked_lower_flags)
@@ -497,8 +522,20 @@ class FlagSystemSettingsWindow(QDialog):
         if self.current_flag and is_upper:
             self.current_flag.priority = priority
     
+    def _on_linked_active_changed(self, active_id: str, is_checked: bool):
+        """상위 플래그에 연결할 EARTHQUAKE_ACTIVE 변경"""
+        if not self.current_flag or self.current_flag.flag_type != "upper":
+            return
+        
+        if is_checked:
+            if active_id not in self.current_flag.linked_active_ids:
+                self.current_flag.linked_active_ids.append(active_id)
+        else:
+            if active_id in self.current_flag.linked_active_ids:
+                self.current_flag.linked_active_ids.remove(active_id)
+    
     def _on_linked_lower_changed(self, lower_flag_id: str, is_checked: bool):
-        """상위 플래그에 포함할 하위 플래그 변경"""
+        """상위 플래그에 포함할 하위 플래그 변경 (레거시)"""
         if not self.current_flag or self.current_flag.flag_type != "upper":
             return
         
