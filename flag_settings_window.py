@@ -429,12 +429,35 @@ class FlagSystemSettingsWindow(QDialog):
         flag_name = current_item.text()
         flags_dict = self.flag_system.upper_flags if is_upper else self.flag_system.lower_flags
         
+        deleted_flag_id = None
         for flag_id, flag in flags_dict.items():
             if flag.name == flag_name:
+                deleted_flag_id = flag_id
                 self.flag_system.remove_flag(flag_id)
                 break
         
+        # 삭제된 플래그가 현재 선택된 플래그인 경우 초기화
+        if self.current_flag and self.current_flag.flag_id == deleted_flag_id:
+            self.current_flag = None
+        
+        # 목록 새로고침
         self._load_flags()
+        
+        # 선택 해제
+        flag_list.clearSelection()
+        
+        # UI 초기화 (조건 탭)
+        if is_upper:
+            if hasattr(self, 'upper_priority_combo'):
+                self.upper_priority_combo.setCurrentIndex(0)  # 자동으로 설정
+            if hasattr(self, 'upper_linked_active_checkboxes'):
+                for checkbox in self.upper_linked_active_checkboxes.values():
+                    checkbox.setChecked(False)
+        else:
+            if hasattr(self, 'lower_on_conditions_list'):
+                self.lower_on_conditions_list.clear()
+            if hasattr(self, 'lower_off_conditions_list'):
+                self.lower_off_conditions_list.clear()
     
     def _on_flag_selected(self, flag_list: QListWidget, is_upper: bool):
         """플래그 선택 시"""

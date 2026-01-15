@@ -3,11 +3,57 @@
     "version": "1.0",
     "note": "지진 인스턴스 시스템 설정"
   },
-  "instance_types": [],
+  "instance_types": [
+    {
+      "type_id": "45c8b8f2",
+      "name": "일본지진",
+      "create_conditions": [
+        {
+          "type": "EEW 신규 발표",
+          "params": {
+            "announcement_types": [
+              "신규 발표"
+            ],
+            "intensity_filter": "필터 없음"
+          },
+          "delay": 0.0
+        },
+        {
+          "type": "진도속보 수신",
+          "params": {},
+          "delay": 0.0
+        },
+        {
+          "type": "진원정보 수신",
+          "params": {},
+          "delay": 0.0
+        }
+      ],
+      "end_conditions": [
+        {
+          "type": "무감지진",
+          "params": {},
+          "delay": 600.0
+        },
+        {
+          "type": "진원진도정보 수신",
+          "params": {},
+          "delay": 5.0
+        },
+        {
+          "type": "EEW 취소보",
+          "params": {
+            "intensity_filter": "필터 없음"
+          },
+          "delay": 100.0
+        }
+      ]
+    }
+  ],
   "active_configs": [
     {
       "active_id": "186869c3",
-      "name": "새 EARTHQUAKE_ACTIVE 1",
+      "name": "일본지진진행",
       "aggregated_instance_types": []
     }
   ]

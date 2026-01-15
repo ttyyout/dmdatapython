@@ -2145,6 +2145,10 @@ class OBSController:
             self.obs_ws.connect()
             self.connected = True
             print("✅ OBS WebSocket 연결 성공")
+            
+            # 연결 성공 시 장면/소스/필터 목록 미리 로드
+            self._load_obs_info_on_connect()
+            
             return True
         except ImportError as e:
             print(f"⚠️ obswebsocket 모듈이 설치되지 않음: {e}")
@@ -2153,6 +2157,44 @@ class OBSController:
         except Exception as e:
             print(f"⚠️ OBS WebSocket 연결 실패: {e}")
             return False
+    
+    def _load_obs_info_on_connect(self):
+        """OBS 연결 시 장면/소스/필터 정보 미리 로드"""
+        try:
+            print("📡 OBS 장면/소스/필터 정보 로드 중...")
+            
+            # 장면 목록 가져오기
+            scenes = self.get_scene_list()
+            if scenes:
+                print(f"✅ OBS 장면 {len(scenes)}개 로드 완료: {[s['name'] for s in scenes]}")
+                
+                # 각 장면의 소스 아이템 정보도 미리 로드
+                for scene in scenes:
+                    scene_name = scene['name']
+                    try:
+                        items = self.get_scene_items(scene_name)
+                        if items:
+                            print(f"  - {scene_name}: {len(items)}개 소스")
+                            
+                            # 각 소스의 필터 목록도 미리 로드
+                            for item in items:
+                                source_name = item.get('sourceName', '')
+                                if source_name:
+                                    try:
+                                        filters = self.get_source_filter_list(source_name)
+                                        if filters:
+                                            print(f"    - {source_name}: {len(filters)}개 필터")
+                                    except Exception as e:
+                                        # 필터 로드 실패는 무시 (일부 소스는 필터가 없을 수 있음)
+                                        pass
+                    except Exception as e:
+                        print(f"⚠️ 장면 '{scene_name}' 소스 로드 실패: {e}")
+            else:
+                print("⚠️ OBS 장면이 없습니다.")
+        except Exception as e:
+            print(f"⚠️ OBS 정보 로드 중 오류 발생: {e}")
+            import traceback
+            traceback.print_exc()
     
     def get_scene_list(self):
         """OBS 장면 목록 가져오기"""

@@ -19,7 +19,7 @@
       "state": false,
       "on_actions": [],
       "off_actions": [],
-      "linked_active_ids": []
+      "linked_earthquake_active": []
     },
     {
       "id": "75fb3ae6",
@@ -28,9 +28,23 @@
       "priority": 2,
       "last_state_change_time": null,
       "state": false,
-      "on_actions": [],
-      "off_actions": [],
-      "linked_active_ids": []
+      "on_actions": [
+        {
+          "type": "장면 전환",
+          "params": {
+            "scene_name": "일본"
+          }
+        }
+      ],
+      "off_actions": [
+        {
+          "type": "장면 전환",
+          "params": {
+            "scene_name": "일반"
+          }
+        }
+      ],
+      "linked_earthquake_active": []
     }
   ],
   "lower_flags": [
@@ -79,7 +93,18 @@
           "delay": 0.0
         }
       ],
-      "off_conditions": []
+      "off_conditions": [
+        {
+          "type": "EEW 최종보",
+          "params": {
+            "announcement_types": [
+              "최종보"
+            ],
+            "intensity_filter": "필터 없음"
+          },
+          "delay": 0.0
+        }
+      ]
     },
     {
       "id": "4e9c56cf",
@@ -90,12 +115,56 @@
       "state": false,
       "on_actions": [],
       "off_actions": [],
-      "on_conditions": [],
-      "off_conditions": []
+      "on_conditions": [
+        {
+          "type": "EEW 경보 신규 발표",
+          "params": {
+            "announcement_types": [
+              "경보 신규 발표"
+            ],
+            "intensity_filter": "필터 없음"
+          },
+          "delay": 0.0
+        }
+      ],
+      "off_conditions": [
+        {
+          "type": "EEW 경보 취소",
+          "params": {
+            "announcement_types": [
+              "경보 취소"
+            ],
+            "intensity_filter": "필터 없음"
+          },
+          "delay": 0.0
+        },
+        {
+          "type": "EEW 최종보",
+          "params": {
+            "announcement_types": [
+              "최종보"
+            ],
+            "intensity_filter": "필터 없음"
+          },
+          "delay": 0.0
+        }
+      ]
     },
     {
       "id": "bec59413",
       "name": "일본지진",
+      "type": "lower",
+      "priority": null,
+      "last_state_change_time": null,
+      "state": false,
+      "on_actions": [],
+      "off_actions": [],
+      "on_conditions": [],
+      "off_conditions": []
+    },
+    {
+      "id": "d04c28ef",
+      "name": "새 플래그 5",
       "type": "lower",
       "priority": null,
       "last_state_change_time": null,
