@@ -661,8 +661,347 @@ class FlagSystemSettingsWindow(QDialog):
         # 기타 조건은 기본 형식
         return f"{condition_type}{delay_text}"
     
+    def _create_instance_types_tab(self) -> QWidget:
+        """인스턴스 종류 설정 탭 생성"""
+        widget = QWidget()
+        layout = QHBoxLayout()
+        
+        # 왼쪽: 인스턴스 종류 목록
+        left_panel = QVBoxLayout()
+        left_panel.addWidget(QLabel("인스턴스 종류 목록"))
+        
+        type_list = QListWidget()
+        type_list.currentItemChanged.connect(self._on_instance_type_selected)
+        left_panel.addWidget(type_list)
+        
+        type_buttons = QHBoxLayout()
+        add_btn = QPushButton("추가")
+        add_btn.clicked.connect(self._add_instance_type)
+        remove_btn = QPushButton("삭제")
+        remove_btn.clicked.connect(lambda: self._remove_instance_type(type_list))
+        type_buttons.addWidget(add_btn)
+        type_buttons.addWidget(remove_btn)
+        left_panel.addLayout(type_buttons)
+        
+        layout.addLayout(left_panel, 1)
+        
+        # 오른쪽: 설정 편집
+        right_panel = QVBoxLayout()
+        
+        # 이름
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(QLabel("종류 이름:"))
+        type_name_edit = QLineEdit()
+        type_name_edit.textChanged.connect(self._on_instance_type_name_changed)
+        name_layout.addWidget(type_name_edit)
+        right_panel.addLayout(name_layout)
+        
+        # 생성 조건
+        create_conditions_group = QGroupBox("생성 조건 (OR: 하나라도 만족하면 생성)")
+        create_conditions_layout = QVBoxLayout()
+        create_conditions_list = QListWidget()
+        create_conditions_list.setMaximumHeight(150)
+        create_conditions_layout.addWidget(create_conditions_list)
+        
+        create_condition_buttons = QHBoxLayout()
+        add_create_btn = QPushButton("조건 추가")
+        add_create_btn.clicked.connect(lambda: self._add_instance_condition(True))
+        remove_create_btn = QPushButton("조건 삭제")
+        remove_create_btn.clicked.connect(lambda: self._remove_instance_condition(create_conditions_list, True))
+        create_condition_buttons.addWidget(add_create_btn)
+        create_condition_buttons.addWidget(remove_create_btn)
+        create_conditions_layout.addLayout(create_condition_buttons)
+        
+        create_conditions_group.setLayout(create_conditions_layout)
+        right_panel.addWidget(create_conditions_group)
+        
+        # 종료 조건
+        end_conditions_group = QGroupBox("종료 조건 (OR: 하나라도 만족하면 종료)")
+        end_conditions_layout = QVBoxLayout()
+        end_conditions_list = QListWidget()
+        end_conditions_list.setMaximumHeight(150)
+        end_conditions_layout.addWidget(end_conditions_list)
+        
+        end_condition_buttons = QHBoxLayout()
+        add_end_btn = QPushButton("조건 추가")
+        add_end_btn.clicked.connect(lambda: self._add_instance_condition(False))
+        remove_end_btn = QPushButton("조건 삭제")
+        remove_end_btn.clicked.connect(lambda: self._remove_instance_condition(end_conditions_list, False))
+        end_condition_buttons.addWidget(add_end_btn)
+        end_condition_buttons.addWidget(remove_end_btn)
+        end_conditions_layout.addLayout(end_condition_buttons)
+        
+        end_conditions_group.setLayout(end_conditions_layout)
+        right_panel.addWidget(end_conditions_group)
+        
+        layout.addLayout(right_panel, 2)
+        widget.setLayout(layout)
+        
+        # 위젯 참조 저장
+        self.instance_type_list = type_list
+        self.instance_type_name_edit = type_name_edit
+        self.instance_create_conditions_list = create_conditions_list
+        self.instance_end_conditions_list = end_conditions_list
+        
+        # 초기 로드
+        self._load_instance_types()
+        
+        return widget
+    
+    def _create_active_configs_tab(self) -> QWidget:
+        """EARTHQUAKE_ACTIVE 설정 탭 생성"""
+        widget = QWidget()
+        layout = QHBoxLayout()
+        
+        # 왼쪽: EARTHQUAKE_ACTIVE 목록
+        left_panel = QVBoxLayout()
+        left_panel.addWidget(QLabel("EARTHQUAKE_ACTIVE 목록"))
+        
+        active_list = QListWidget()
+        active_list.currentItemChanged.connect(self._on_active_config_selected)
+        left_panel.addWidget(active_list)
+        
+        active_buttons = QHBoxLayout()
+        add_btn = QPushButton("추가")
+        add_btn.clicked.connect(self._add_active_config)
+        remove_btn = QPushButton("삭제")
+        remove_btn.clicked.connect(lambda: self._remove_active_config(active_list))
+        active_buttons.addWidget(add_btn)
+        active_buttons.addWidget(remove_btn)
+        left_panel.addLayout(active_buttons)
+        
+        layout.addLayout(left_panel, 1)
+        
+        # 오른쪽: 설정 편집
+        right_panel = QVBoxLayout()
+        
+        # 이름
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(QLabel("이름:"))
+        active_name_edit = QLineEdit()
+        active_name_edit.textChanged.connect(self._on_active_config_name_changed)
+        name_layout.addWidget(active_name_edit)
+        right_panel.addLayout(name_layout)
+        
+        # 집계할 인스턴스 종류 선택
+        aggregated_group = QGroupBox("집계할 인스턴스 종류 선택 (OR: 하나라도 활성이면 ON)")
+        aggregated_layout = QVBoxLayout()
+        
+        scroll_area = QScrollArea()
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout()
+        
+        checkboxes_dict = {}
+        if self.instance_system:
+            for type_id, type_config in self.instance_system.instance_types.items():
+                checkbox = QCheckBox(type_config.name)
+                checkbox.setProperty("type_id", type_id)
+                checkbox.stateChanged.connect(lambda state, tid=type_id: self._on_aggregated_type_changed(tid, state == Qt.Checked))
+                scroll_layout.addWidget(checkbox)
+                checkboxes_dict[type_id] = checkbox
+        
+        scroll_widget.setLayout(scroll_layout)
+        scroll_area.setWidget(scroll_widget)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMaximumHeight(200)
+        aggregated_layout.addWidget(scroll_area)
+        
+        aggregated_group.setLayout(aggregated_layout)
+        right_panel.addWidget(aggregated_group)
+        
+        layout.addLayout(right_panel, 2)
+        widget.setLayout(layout)
+        
+        # 위젯 참조 저장
+        self.active_config_list = active_list
+        self.active_config_name_edit = active_name_edit
+        self.active_aggregated_checkboxes = checkboxes_dict
+        
+        # 초기 로드
+        self._load_active_configs()
+        
+        return widget
+    
+    def _load_instance_types(self):
+        """인스턴스 종류 목록 로드"""
+        if hasattr(self, 'instance_type_list'):
+            self.instance_type_list.clear()
+            if self.instance_system:
+                for type_config in self.instance_system.instance_types.values():
+                    self.instance_type_list.addItem(type_config.name)
+    
+    def _load_active_configs(self):
+        """EARTHQUAKE_ACTIVE 목록 로드"""
+        if hasattr(self, 'active_config_list'):
+            self.active_config_list.clear()
+            if self.instance_system:
+                for active_config in self.instance_system.active_configs.values():
+                    self.active_config_list.addItem(active_config.name)
+    
+    def _add_instance_type(self):
+        """인스턴스 종류 추가"""
+        if not self.instance_system:
+            return
+        import uuid
+        type_id = str(uuid.uuid4())[:8]
+        type_name = f"새 인스턴스 종류 {len(self.instance_system.instance_types) + 1}"
+        
+        type_config = InstanceTypeConfig(type_id, type_name)
+        self.instance_system.add_instance_type(type_config)
+        self._load_instance_types()
+    
+    def _remove_instance_type(self, type_list: QListWidget):
+        """인스턴스 종류 삭제"""
+        if not self.instance_system:
+            return
+        current_item = type_list.currentItem()
+        if not current_item:
+            return
+        
+        type_name = current_item.text()
+        for type_id, type_config in list(self.instance_system.instance_types.items()):
+            if type_config.name == type_name:
+                self.instance_system.remove_instance_type(type_id)
+                break
+        
+        self._load_instance_types()
+    
+    def _on_instance_type_selected(self):
+        """인스턴스 종류 선택 시"""
+        if not self.instance_system:
+            return
+        current_item = self.instance_type_list.currentItem()
+        if not current_item:
+            return
+        
+        type_name = current_item.text()
+        for type_config in self.instance_system.instance_types.values():
+            if type_config.name == type_name:
+                self.current_instance_type = type_config
+                self.instance_type_name_edit.setText(type_config.name)
+                
+                # 조건 목록 업데이트
+                self.instance_create_conditions_list.clear()
+                for condition in type_config.create_conditions:
+                    condition_text = self._format_condition_text(condition)
+                    self.instance_create_conditions_list.addItem(condition_text)
+                
+                self.instance_end_conditions_list.clear()
+                for condition in type_config.end_conditions:
+                    condition_text = self._format_condition_text(condition)
+                    self.instance_end_conditions_list.addItem(condition_text)
+                break
+    
+    def _on_instance_type_name_changed(self, text: str):
+        """인스턴스 종류 이름 변경"""
+        if self.current_instance_type:
+            self.current_instance_type.name = text
+            self._load_instance_types()
+    
+    def _add_instance_condition(self, is_create: bool):
+        """인스턴스 조건 추가"""
+        if not self.current_instance_type:
+            return
+        
+        from condition_dialog import ConditionDialog
+        dialog = ConditionDialog(self.flag_system, parent=self)
+        if dialog.exec() == QDialogBase.Accepted:
+            condition = dialog.get_condition()
+            if condition:
+                if is_create:
+                    self.current_instance_type.create_conditions.append(condition)
+                else:
+                    self.current_instance_type.end_conditions.append(condition)
+                
+                self._on_instance_type_selected()
+    
+    def _remove_instance_condition(self, condition_list: QListWidget, is_create: bool):
+        """인스턴스 조건 삭제"""
+        if not self.current_instance_type:
+            return
+        
+        current_row = condition_list.currentRow()
+        if current_row < 0:
+            return
+        
+        if is_create:
+            if current_row < len(self.current_instance_type.create_conditions):
+                del self.current_instance_type.create_conditions[current_row]
+        else:
+            if current_row < len(self.current_instance_type.end_conditions):
+                del self.current_instance_type.end_conditions[current_row]
+        
+        self._on_instance_type_selected()
+    
+    def _add_active_config(self):
+        """EARTHQUAKE_ACTIVE 추가"""
+        if not self.instance_system:
+            return
+        import uuid
+        active_id = str(uuid.uuid4())[:8]
+        active_name = f"새 EARTHQUAKE_ACTIVE {len(self.instance_system.active_configs) + 1}"
+        
+        active_config = EarthquakeActiveConfig(active_id, active_name)
+        self.instance_system.add_active_config(active_config)
+        self._load_active_configs()
+    
+    def _remove_active_config(self, active_list: QListWidget):
+        """EARTHQUAKE_ACTIVE 삭제"""
+        if not self.instance_system:
+            return
+        current_item = active_list.currentItem()
+        if not current_item:
+            return
+        
+        active_name = current_item.text()
+        for active_id, active_config in list(self.instance_system.active_configs.items()):
+            if active_config.name == active_name:
+                self.instance_system.remove_active_config(active_id)
+                break
+        
+        self._load_active_configs()
+    
+    def _on_active_config_selected(self):
+        """EARTHQUAKE_ACTIVE 선택 시"""
+        if not self.instance_system:
+            return
+        current_item = self.active_config_list.currentItem()
+        if not current_item:
+            return
+        
+        active_name = current_item.text()
+        for active_config in self.instance_system.active_configs.values():
+            if active_config.name == active_name:
+                self.current_active_config = active_config
+                self.active_config_name_edit.setText(active_config.name)
+                
+                # 체크박스 업데이트
+                for type_id, checkbox in self.active_aggregated_checkboxes.items():
+                    checkbox.setChecked(type_id in active_config.aggregated_instance_types)
+                break
+    
+    def _on_active_config_name_changed(self, text: str):
+        """EARTHQUAKE_ACTIVE 이름 변경"""
+        if self.current_active_config:
+            self.current_active_config.name = text
+            self._load_active_configs()
+    
+    def _on_aggregated_type_changed(self, type_id: str, is_checked: bool):
+        """집계할 인스턴스 종류 변경"""
+        if not self.current_active_config:
+            return
+        
+        if is_checked:
+            if type_id not in self.current_active_config.aggregated_instance_types:
+                self.current_active_config.aggregated_instance_types.append(type_id)
+        else:
+            if type_id in self.current_active_config.aggregated_instance_types:
+                self.current_active_config.aggregated_instance_types.remove(type_id)
+    
     def save_and_close(self):
         """저장하고 닫기"""
         self.flag_system.save_config()
+        if self.instance_system:
+            self.instance_system.save_config()
         self.accept()
 
