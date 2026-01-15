@@ -1,0 +1,14 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "note": "지진 인스턴스 시스템 설정"
+  },
+  "instance_types": [],
+  "active_configs": [
+    {
+      "active_id": "186869c3",
+      "name": "새 EARTHQUAKE_ACTIVE 1",
+      "aggregated_instance_types": []
+    }
+  ]
+}

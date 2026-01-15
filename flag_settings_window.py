@@ -130,7 +130,7 @@ class FlagSystemSettingsWindow(QDialog):
         self._load_flags()
         
         # 상위 플래그 체크박스 딕셔너리 초기화
-        self.upper_linked_lower_checkboxes = {}
+        self.upper_linked_active_checkboxes = {}
     
     def _create_conditions_tab(self, is_upper: bool) -> QWidget:
         """조건 제어 탭 생성"""
@@ -202,46 +202,48 @@ class FlagSystemSettingsWindow(QDialog):
             else:
                 self.lower_priority_combo = priority_combo
         
-        # 상위 플래그에 포함할 하위 플래그 선택 (상위 플래그만)
+        # 상위 플래그에 연결할 EARTHQUAKE_ACTIVE 선택 (상위 플래그만)
         if is_upper:
-            linked_lower_group = QGroupBox("이 상위 플래그에 포함할 하위 플래그 선택")
-            linked_lower_layout = QVBoxLayout()
+            linked_active_group = QGroupBox("이 상위 플래그에 연결할 EARTHQUAKE_ACTIVE 선택")
+            linked_active_layout = QVBoxLayout()
             
             # 스크롤 가능한 체크박스 영역
             scroll_area = QScrollArea()
             scroll_widget = QWidget()
             scroll_layout = QVBoxLayout()
             
-            # 하위 플래그 체크박스 생성
+            # EARTHQUAKE_ACTIVE 체크박스 생성
             checkboxes_dict = {}
-            for lower_flag in self.flag_system.lower_flags.values():
-                checkbox = QCheckBox(lower_flag.name)
-                checkbox.setProperty("flag_id", lower_flag.flag_id)
-                checkbox.stateChanged.connect(lambda state, flag_id=lower_flag.flag_id: self._on_linked_lower_changed(flag_id, state == Qt.Checked))
-                scroll_layout.addWidget(checkbox)
-                checkboxes_dict[lower_flag.flag_id] = checkbox
+            if self.instance_system:
+                for active_id, active_config in self.instance_system.active_configs.items():
+                    checkbox = QCheckBox(active_config.name)
+                    checkbox.setProperty("active_id", active_id)
+                    checkbox.stateChanged.connect(lambda state, aid=active_id: self._on_linked_active_changed(aid, state == Qt.Checked))
+                    scroll_layout.addWidget(checkbox)
+                    checkboxes_dict[active_id] = checkbox
             
             scroll_widget.setLayout(scroll_layout)
             scroll_area.setWidget(scroll_widget)
             scroll_area.setWidgetResizable(True)
             scroll_area.setMaximumHeight(200)
-            linked_lower_layout.addWidget(scroll_area)
+            linked_active_layout.addWidget(scroll_area)
             
             # 설명 문구
-            linked_lower_desc = QLabel(
-                "체크된 하위 플래그 중 하나라도 켜져 있으면 이 상위 플래그는 켜집니다.\n"
-                "모든 체크된 하위 플래그가 꺼져 있으면 이 상위 플래그는 꺼집니다."
+            linked_active_desc = QLabel(
+                "체크된 EARTHQUAKE_ACTIVE 상태 중 하나라도 활성화되면\n"
+                "이 상위 플래그가 켜집니다.\n"
+                "모든 선택된 EARTHQUAKE_ACTIVE가 비활성화되면 꺼집니다."
             )
-            linked_lower_desc.setWordWrap(True)
-            linked_lower_desc.setStyleSheet("color: #888; padding: 5px; font-size: 9pt;")
-            linked_lower_layout.addWidget(linked_lower_desc)
+            linked_active_desc.setWordWrap(True)
+            linked_active_desc.setStyleSheet("color: #888; padding: 5px; font-size: 9pt;")
+            linked_active_layout.addWidget(linked_active_desc)
             
-            linked_lower_group.setLayout(linked_lower_layout)
-            right_panel.addWidget(linked_lower_group)
+            linked_active_group.setLayout(linked_active_layout)
+            right_panel.addWidget(linked_active_group)
             
             # 체크박스 딕셔너리 저장
             if is_upper:
-                self.upper_linked_lower_checkboxes = checkboxes_dict
+                self.upper_linked_active_checkboxes = checkboxes_dict
         
         # 조건 설정 (하위 플래그만, 상위 플래그는 조건 없음)
         if not is_upper:
@@ -464,11 +466,6 @@ class FlagSystemSettingsWindow(QDialog):
                     for active_id, checkbox in self.upper_linked_active_checkboxes.items():
                         checkbox.setChecked(active_id in flag.linked_active_ids)
                 
-                # 상위 플래그: 하위 플래그 체크박스 업데이트 (레거시)
-                if is_upper and hasattr(self, 'upper_linked_lower_checkboxes'):
-                    for lower_flag_id, checkbox in self.upper_linked_lower_checkboxes.items():
-                        checkbox.setChecked(lower_flag_id in flag.linked_lower_flags)
-                
                 # 조건 목록 업데이트 (하위 플래그만)
                 if not is_upper:
                     on_list = self.lower_on_conditions_list
@@ -533,18 +530,6 @@ class FlagSystemSettingsWindow(QDialog):
         else:
             if active_id in self.current_flag.linked_active_ids:
                 self.current_flag.linked_active_ids.remove(active_id)
-    
-    def _on_linked_lower_changed(self, lower_flag_id: str, is_checked: bool):
-        """상위 플래그에 포함할 하위 플래그 변경 (레거시)"""
-        if not self.current_flag or self.current_flag.flag_type != "upper":
-            return
-        
-        if is_checked:
-            if lower_flag_id not in self.current_flag.linked_lower_flags:
-                self.current_flag.linked_lower_flags.append(lower_flag_id)
-        else:
-            if lower_flag_id in self.current_flag.linked_lower_flags:
-                self.current_flag.linked_lower_flags.remove(lower_flag_id)
     
     def _add_condition(self, is_upper: bool, is_on: bool):
         """조건 추가 (하위 플래그만)"""

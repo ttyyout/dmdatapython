@@ -86,9 +86,7 @@ class Flag:
         
         # 상위 플래그 전용: EARTHQUAKE_ACTIVE ID 목록
         # 상위 플래그 상태 = OR(linked_active_ids의 상태)
-        # 레거시 호환: linked_lower_flags도 지원하지만 우선순위는 linked_active_ids가 높음
         self.linked_active_ids: List[str] = []  # EARTHQUAKE_ACTIVE ID 목록
-        self.linked_lower_flags: List[str] = []  # 레거시: 하위 플래그 ID 목록 (호환성 유지)
         
         # 조건들 (하위 플래그만 가짐, 상위 플래그는 조건 없음)
         # 켜짐 조건들 (OR 관계: 하나라도 만족하면 켜짐)
@@ -127,11 +125,9 @@ class Flag:
             "off_actions": [a.to_dict() for a in self.off_actions]
         }
         
-        # 상위 플래그는 linked_active_ids 저장 (우선), linked_lower_flags는 레거시 호환
+        # 상위 플래그는 linked_earthquake_active만 저장
         if self.flag_type == "upper":
-            result["linked_active_ids"] = self.linked_active_ids
-            if self.linked_lower_flags:  # 레거시 호환
-                result["linked_lower_flags"] = self.linked_lower_flags
+            result["linked_earthquake_active"] = self.linked_active_ids
         
         # 하위 플래그는 조건만 저장
         if self.flag_type == "lower":
@@ -167,14 +163,14 @@ class Flag:
         flag.last_state_change_time = data.get("last_state_change_time")
         flag.state = data.get("state", False)  # 저장된 상태 복원
         
-        # 상위 플래그는 linked_active_ids 로드 (우선), linked_lower_flags는 레거시 호환
+        # 상위 플래그는 linked_earthquake_active만 로드 (레거시: linked_active_ids도 지원)
         if flag.flag_type == "upper":
-            flag.linked_active_ids = data.get("linked_active_ids", [])
-            flag.linked_lower_flags = data.get("linked_lower_flags", [])  # 레거시 호환
+            # linked_earthquake_active 우선, 없으면 linked_active_ids (레거시 호환)
+            flag.linked_active_ids = data.get("linked_earthquake_active", data.get("linked_active_ids", []))
             # 상위 플래그는 조건을 가지지 않음
             flag.on_conditions = []
             flag.off_conditions = []
-            # 레거시 필드 무시 (parent_flag_id, target_upper_flag_id 등)
+            # 레거시 필드 무시 (parent_flag_id, target_upper_flag_id, linked_lower_flags 등)
         
         # 하위 플래그는 조건만 로드
         if flag.flag_type == "lower":
@@ -231,10 +227,8 @@ class FlagSystem(QObject):
         if flag_id in self.all_flags:
             del self.all_flags[flag_id]
         
-        # 상위 플래그의 linked_lower_flags에서 제거
-        for flag in self.all_flags.values():
-            if flag.flag_type == "upper" and flag_id in flag.linked_lower_flags:
-                flag.linked_lower_flags.remove(flag_id)
+        # 상위 플래그는 이제 linked_active_ids만 사용하므로
+        # 플래그 삭제 시 특별한 처리가 필요 없음
     
     def get_flag(self, flag_id: str) -> Optional[Flag]:
         """플래그 가져오기"""
@@ -370,9 +364,8 @@ class FlagSystem(QObject):
         상위 플래그 상태 계산
         
         규칙:
-        1. linked_active_ids가 있으면: EARTHQUAKE_ACTIVE 상태를 OR 집계
-        2. linked_active_ids가 없고 linked_lower_flags가 있으면: 하위 플래그를 OR 집계 (레거시 호환)
-        3. 둘 다 없으면: False
+        - 상위 플래그 상태 = OR(연결된 모든 EARTHQUAKE_ACTIVE 상태)
+        - linked_active_ids가 없으면: False
         
         Returns:
             상위 플래그 상태 변경이 있었으면 True
@@ -383,22 +376,13 @@ class FlagSystem(QObject):
         for upper_flag in self.upper_flags.values():
             should_be_on = False
             
-            # 1. EARTHQUAKE_ACTIVE 집계 (우선)
+            # EARTHQUAKE_ACTIVE 집계
             if upper_flag.linked_active_ids and self.instance_system:
                 # linked_active_ids 중 하나라도 활성이면 True
                 for active_id in upper_flag.linked_active_ids:
                     if self.instance_system.get_active_state(active_id):
                         should_be_on = True
                         break
-            
-            # 2. 레거시: 하위 플래그 집계 (linked_active_ids가 없을 때만)
-            elif upper_flag.linked_lower_flags:
-                linked_lower_flags = [
-                    self.lower_flags[lower_flag_id]
-                    for lower_flag_id in upper_flag.linked_lower_flags
-                    if lower_flag_id in self.lower_flags
-                ]
-                should_be_on = any(lower_flag.state for lower_flag in linked_lower_flags) if linked_lower_flags else False
             
             # 상태 변경이 필요한 경우
             if upper_flag.state != should_be_on:

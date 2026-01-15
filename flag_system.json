@@ -19,7 +19,7 @@
       "state": false,
       "on_actions": [],
       "off_actions": [],
-      "linked_lower_flags": []
+      "linked_active_ids": []
     },
     {
       "id": "75fb3ae6",
@@ -30,7 +30,7 @@
       "state": false,
       "on_actions": [],
       "off_actions": [],
-      "linked_lower_flags": []
+      "linked_active_ids": []
     }
   ],
   "lower_flags": [
