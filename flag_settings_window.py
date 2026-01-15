@@ -446,7 +446,7 @@ class FlagSystemSettingsWindow(QDialog):
         self._load_flags()
     
     def _remove_flag(self, flag_list: QListWidget, is_upper: bool):
-        """플래그 삭제"""
+        """플래그 삭제 - 단일 진입점으로 모든 UI 동기화"""
         current_item = flag_list.currentItem()
         if not current_item:
             return
@@ -458,101 +458,133 @@ class FlagSystemSettingsWindow(QDialog):
         for flag_id, flag in flags_dict.items():
             if flag.name == flag_name:
                 deleted_flag_id = flag_id
-                self.flag_system.remove_flag(flag_id)
                 break
         
         if not deleted_flag_id:
             return  # 플래그를 찾지 못한 경우
         
+        # 단일 진입점: flag_system.remove_flag() 호출
+        self.flag_system.remove_flag(deleted_flag_id)
+        
         # 삭제된 플래그가 현재 선택된 플래그인 경우 초기화
         if self.current_flag and self.current_flag.flag_id == deleted_flag_id:
             self.current_flag = None
         
+        # 모든 UI 새로고침 (통합 refresh)
+        self._refresh_all_ui_after_flag_deletion(is_upper, deleted_flag_id)
+    
+    def _refresh_all_ui_after_flag_deletion(self, is_upper: bool, deleted_flag_id: str):
+        """플래그 삭제 후 모든 탭 UI 새로고침"""
         # 모든 플래그 목록 새로고침
         self._load_flags()
         
-        # 조건 탭의 플래그 목록도 직접 새로고침
-        if is_upper and self.upper_conditions_flag_list:
-            self.upper_conditions_flag_list.clear()
-            for flag in self.flag_system.upper_flags.values():
-                self.upper_conditions_flag_list.addItem(flag.name)
-        elif not is_upper and self.lower_conditions_flag_list:
-            self.lower_conditions_flag_list.clear()
-            for flag in self.flag_system.lower_flags.values():
-                self.lower_conditions_flag_list.addItem(flag.name)
-        
-        # 전달받은 flag_list도 새로고침
-        flag_list.clear()
-        flags_dict = self.flag_system.upper_flags if is_upper else self.flag_system.lower_flags
-        for flag in flags_dict.values():
-            flag_list.addItem(flag.name)
-        
-        # 선택 해제
-        flag_list.clearSelection()
-        
-        # UI 초기화 (조건 탭)
+        # 조건 탭의 플래그 목록 새로고침
         if is_upper:
-            if hasattr(self, 'upper_priority_combo'):
+            if hasattr(self, 'upper_conditions_flag_list') and self.upper_conditions_flag_list:
+                self.upper_conditions_flag_list.clear()
+                for flag in self.flag_system.upper_flags.values():
+                    self.upper_conditions_flag_list.addItem(flag.name)
+                self.upper_conditions_flag_list.clearSelection()
+        else:
+            if hasattr(self, 'lower_conditions_flag_list') and self.lower_conditions_flag_list:
+                self.lower_conditions_flag_list.clear()
+                for flag in self.flag_system.lower_flags.values():
+                    self.lower_conditions_flag_list.addItem(flag.name)
+                self.lower_conditions_flag_list.clearSelection()
+        
+        # 조건 UI 초기화
+        if is_upper:
+            # 상위 플래그: 우선순위, EARTHQUAKE_ACTIVE 체크박스, 조건 목록 초기화
+            if hasattr(self, 'upper_priority_combo') and self.upper_priority_combo:
                 self.upper_priority_combo.setCurrentIndex(0)  # 자동으로 설정
-            if hasattr(self, 'upper_linked_active_checkboxes'):
+            
+            if hasattr(self, 'upper_linked_active_checkboxes') and self.upper_linked_active_checkboxes:
                 for checkbox in self.upper_linked_active_checkboxes.values():
                     checkbox.setChecked(False)
-            # 조건 목록 초기화
+            
+            if hasattr(self, 'upper_flag_name_edit') and self.upper_flag_name_edit:
+                self.upper_flag_name_edit.clear()
+            
             if hasattr(self, 'upper_on_conditions_list') and self.upper_on_conditions_list:
                 self.upper_on_conditions_list.clear()
             if hasattr(self, 'upper_off_conditions_list') and self.upper_off_conditions_list:
                 self.upper_off_conditions_list.clear()
         else:
-            if hasattr(self, 'lower_on_conditions_list'):
+            # 하위 플래그: 조건 목록 초기화
+            if hasattr(self, 'lower_flag_name_edit') and self.lower_flag_name_edit:
+                self.lower_flag_name_edit.clear()
+            
+            if hasattr(self, 'lower_on_conditions_list') and self.lower_on_conditions_list:
                 self.lower_on_conditions_list.clear()
-            if hasattr(self, 'lower_off_conditions_list'):
+            if hasattr(self, 'lower_off_conditions_list') and self.lower_off_conditions_list:
                 self.lower_off_conditions_list.clear()
     
     def _on_flag_selected(self, flag_list: QListWidget, is_upper: bool):
-        """플래그 선택 시"""
+        """플래그 선택 시 - 방어 코드 추가"""
         current_item = flag_list.currentItem()
         if not current_item:
+            # 선택 해제 시 UI 초기화
+            self.current_flag = None
+            if is_upper:
+                if hasattr(self, 'upper_flag_name_edit') and self.upper_flag_name_edit:
+                    self.upper_flag_name_edit.clear()
+            else:
+                if hasattr(self, 'lower_flag_name_edit') and self.lower_flag_name_edit:
+                    self.lower_flag_name_edit.clear()
             return
         
         flag_name = current_item.text()
         flags_dict = self.flag_system.upper_flags if is_upper else self.flag_system.lower_flags
         
+        # 플래그 찾기 (방어 코드: 존재하지 않는 플래그 ID 참조 방지)
+        selected_flag = None
         for flag in flags_dict.values():
             if flag.name == flag_name:
-                self.current_flag = flag
-                flag_name_edit = self.upper_flag_name_edit if is_upper else self.lower_flag_name_edit
-                flag_name_edit.setText(flag.name)
-                
-                # 우선순위 설정 (상위 플래그만)
-                if is_upper and hasattr(self, 'upper_priority_combo'):
-                    priority_combo = self.upper_priority_combo
-                    if flag.priority is None:
-                        priority_combo.setCurrentIndex(0)  # "자동"
-                    else:
-                        idx = priority_combo.findData(flag.priority)
-                        if idx >= 0:
-                            priority_combo.setCurrentIndex(idx)
-                
-                # 상위 플래그: EARTHQUAKE_ACTIVE 체크박스 업데이트
-                if is_upper and hasattr(self, 'upper_linked_active_checkboxes'):
-                    for active_id, checkbox in self.upper_linked_active_checkboxes.items():
-                        checkbox.setChecked(active_id in flag.linked_active_ids)
-                
-                # 조건 목록 업데이트 (하위 플래그만)
-                if not is_upper:
-                    on_list = self.lower_on_conditions_list
-                    off_list = self.lower_off_conditions_list
-                    
-                    on_list.clear()
-                    for condition in flag.on_conditions:
-                        condition_text = self._format_condition_text(condition)
-                        on_list.addItem(condition_text)
-                    
-                    off_list.clear()
-                    for condition in flag.off_conditions:
-                        condition_text = self._format_condition_text(condition)
-                        off_list.addItem(condition_text)
+                selected_flag = flag
                 break
+        
+        if not selected_flag:
+            # 플래그를 찾지 못한 경우 (삭제되었을 수 있음)
+            flag_list.clearSelection()
+            self.current_flag = None
+            return
+        
+        self.current_flag = selected_flag
+        flag_name_edit = self.upper_flag_name_edit if is_upper else self.lower_flag_name_edit
+        if flag_name_edit:
+            flag_name_edit.setText(selected_flag.name)
+        
+        # 우선순위 설정 (상위 플래그만)
+        if is_upper and hasattr(self, 'upper_priority_combo') and self.upper_priority_combo:
+            priority_combo = self.upper_priority_combo
+            if selected_flag.priority is None:
+                priority_combo.setCurrentIndex(0)  # "자동"
+            else:
+                idx = priority_combo.findData(selected_flag.priority)
+                if idx >= 0:
+                    priority_combo.setCurrentIndex(idx)
+        
+        # 상위 플래그: EARTHQUAKE_ACTIVE 체크박스 업데이트
+        if is_upper and hasattr(self, 'upper_linked_active_checkboxes') and self.upper_linked_active_checkboxes:
+            for active_id, checkbox in self.upper_linked_active_checkboxes.items():
+                checkbox.setChecked(active_id in selected_flag.linked_active_ids)
+        
+        # 조건 목록 업데이트 (하위 플래그만)
+        if not is_upper:
+            on_list = self.lower_on_conditions_list
+            off_list = self.lower_off_conditions_list
+            
+            if on_list:
+                on_list.clear()
+                for condition in selected_flag.on_conditions:
+                    condition_text = self._format_condition_text(condition)
+                    on_list.addItem(condition_text)
+            
+            if off_list:
+                off_list.clear()
+                for condition in selected_flag.off_conditions:
+                    condition_text = self._format_condition_text(condition)
+                    off_list.addItem(condition_text)
     
     def _on_flag_selected_for_action(self, flag_list: QListWidget, is_upper: bool):
         """동작 탭에서 플래그 선택 시"""

@@ -48,33 +48,45 @@ class ActionDialog(QDialog):
         
         layout = QVBoxLayout()
         
-        # 동작 타입 선택
+        # 동작 타입 선택 (트리 구조)
         type_group = QGroupBox("동작 타입")
         type_layout = QVBoxLayout()
         
-        self.action_type_combo = QComboBox()
+        # 트리 위젯 생성
+        self.action_type_tree = QTreeWidget()
+        self.action_type_tree.setHeaderLabel("동작 선택")
+        self.action_type_tree.setMaximumHeight(200)
+        self.action_type_tree.setRootIsDecorated(True)
+        self.action_type_tree.setAlternatingRowColors(False)
+        self.action_type_tree.setStyleSheet("""
+            QTreeWidget {
+                background-color: #2a2a2a;
+                color: white;
+                border: 1px solid #4a4a4a;
+                font-size: 11pt;
+            }
+            QTreeWidget::item {
+                padding: 6px;
+                height: 24px;
+            }
+            QTreeWidget::item:selected {
+                background-color: #4a4a4a;
+                color: white;
+            }
+            QTreeWidget::item:hover {
+                background-color: #3a3a3a;
+            }
+            QTreeWidget::branch {
+                background-color: #2a2a2a;
+            }
+        """)
+        self.action_type_tree.itemDoubleClicked.connect(self._on_tree_action_selected)
+        self.action_type_tree.itemSelectionChanged.connect(self._on_tree_action_selection_changed)
         
-        if is_upper:
-            # 상위 플래그 동작
-            self.action_type_combo.addItems([
-                "아무 것도 하지 않기",
-                "장면 전환",
-                "녹화 시작",
-                "녹화 중지",
-                "버퍼 저장"
-            ])
-        else:
-            # 하위 플래그 동작
-            self.action_type_combo.addItems([
-                "아무 것도 하지 않기",
-                "소스 표시",
-                "소스 숨김",
-                "필터 활성화",
-                "필터 비활성화"
-            ])
+        # 트리 구조로 동작 목록 구성
+        self._build_action_tree(is_upper)
         
-        self.action_type_combo.currentTextChanged.connect(self._on_type_changed)
-        type_layout.addWidget(self.action_type_combo)
+        type_layout.addWidget(self.action_type_tree)
         type_group.setLayout(type_layout)
         layout.addWidget(type_group)
         
@@ -102,19 +114,111 @@ class ActionDialog(QDialog):
             self._load_action()
         
         # 초기 파라미터 UI 생성
-        self._on_type_changed()
+        current_item = self.action_type_tree.currentItem()
+        if current_item:
+            action_type = current_item.data(0, Qt.UserRole)
+            if action_type:
+                self._on_type_changed(action_type)
+        else:
+            # 기본으로 "아무 것도 하지 않기" 선택
+            def find_none_action():
+                for i in range(self.action_type_tree.topLevelItemCount()):
+                    root_item = self.action_type_tree.topLevelItem(i)
+                    for j in range(root_item.childCount()):
+                        child = root_item.child(j)
+                        if child.data(0, Qt.UserRole) == "아무 것도 하지 않기":
+                            self.action_type_tree.setCurrentItem(child)
+                            self._on_type_changed("아무 것도 하지 않기")
+                            return
+            find_none_action()
     
-    def _on_type_changed(self):
+    def _build_action_tree(self, is_upper: bool):
+        """동작 트리 구조 구성"""
+        self.action_type_tree.clear()
+        
+        # 동작 그룹 정의
+        if is_upper:
+            # 상위 플래그 동작
+            action_groups = {
+                "None": ["아무 것도 하지 않기"],
+                "Scene": ["장면 전환"],
+                "Recording": ["녹화 시작", "녹화 중지"],
+                "Buffer": ["버퍼 저장"]
+            }
+        else:
+            # 하위 플래그 동작
+            action_groups = {
+                "None": ["아무 것도 하지 않기"],
+                "Source": ["소스 표시", "소스 숨김"],
+                "Filter": ["필터 활성화", "필터 비활성화"]
+            }
+        
+        # 트리 아이템 생성
+        for group_name, actions in action_groups.items():
+            # 그룹 노드
+            group_item = QTreeWidgetItem()
+            group_item.setText(0, group_name)
+            group_item.setData(0, Qt.UserRole, None)  # 그룹은 action_type이 None
+            group_item.setData(0, Qt.UserRole + 1, True)  # is_group = True
+            self.action_type_tree.addTopLevelItem(group_item)
+            
+            # 하위 동작 노드 (leaf)
+            for action_type in actions:
+                action_item = QTreeWidgetItem(group_item)
+                action_item.setText(0, action_type)
+                action_item.setData(0, Qt.UserRole, action_type)  # action_type 저장
+                action_item.setData(0, Qt.UserRole + 1, False)  # is_group = False
+        
+        # 모든 그룹 펼치기
+        self.action_type_tree.expandAll()
+    
+    def _on_tree_action_selection_changed(self):
+        """트리에서 동작 선택 변경 시"""
+        current_item = self.action_type_tree.currentItem()
+        if not current_item:
+            return
+        
+        # 그룹 노드는 선택 불가 (leaf만 선택 가능)
+        is_group = current_item.data(0, Qt.UserRole + 1)
+        if is_group:
+            self.action_type_tree.clearSelection()
+            return
+        
+        action_type = current_item.data(0, Qt.UserRole)
+        if action_type:
+            self._on_type_changed(action_type)
+    
+    def _on_tree_action_selected(self, item, column):
+        """트리에서 동작 더블클릭 시"""
+        is_group = item.data(0, Qt.UserRole + 1)
+        if is_group:
+            # 그룹 노드는 선택 불가
+            return
+        
+        action_type = item.data(0, Qt.UserRole)
+        if action_type:
+            self._on_type_changed(action_type)
+    
+    def _on_type_changed(self, action_type: str = None):
         """동작 타입 변경 시 파라미터 UI 업데이트"""
-        # 기존 파라미터 위젯 제거
-        while self.params_layout.count():
-            child = self.params_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
+        # action_type이 제공되지 않으면 트리에서 가져오기
+        if action_type is None:
+            current_item = self.action_type_tree.currentItem()
+            if current_item:
+                is_group = current_item.data(0, Qt.UserRole + 1)
+                if not is_group:
+                    action_type = current_item.data(0, Qt.UserRole)
+                else:
+                    action_type = None
         
-        self.param_widgets.clear()
-        
-        action_type = self.action_type_combo.currentText()
+        if not action_type:
+            # 기존 파라미터 위젯 제거
+            while self.params_layout.count():
+                child = self.params_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+            self.param_widgets.clear()
+            return
         
         if action_type == "장면 전환":
             # 장면 선택
@@ -270,10 +374,23 @@ class ActionDialog(QDialog):
         if not self.action:
             return
         
-        # 동작 타입 설정
-        index = self.action_type_combo.findText(self.action.action_type)
-        if index >= 0:
-            self.action_type_combo.setCurrentIndex(index)
+        # 트리에서 동작 타입 찾아서 선택
+        action_type = self.action.action_type
+        def find_action_item(parent_item):
+            for i in range(parent_item.childCount()):
+                child = parent_item.child(i)
+                child_action_type = child.data(0, Qt.UserRole)
+                if child_action_type == action_type:
+                    self.action_type_tree.setCurrentItem(child)
+                    self.action_type_tree.scrollToItem(child)
+                    return True
+            return False
+        
+        # 루트 아이템들에서 검색
+        for i in range(self.action_type_tree.topLevelItemCount()):
+            root_item = self.action_type_tree.topLevelItem(i)
+            if find_action_item(root_item):
+                break
         
         # 파라미터 설정
         params = self.action.params
@@ -368,7 +485,20 @@ class ActionDialog(QDialog):
     
     def get_action(self) -> FlagAction:
         """동작 반환"""
-        action_type = self.action_type_combo.currentText()
+        # 트리에서 선택된 동작 타입 가져오기
+        current_item = self.action_type_tree.currentItem()
+        if not current_item:
+            return FlagAction("아무 것도 하지 않기", {})
+        
+        is_group = current_item.data(0, Qt.UserRole + 1)
+        if is_group:
+            # 그룹 노드는 선택 불가
+            return FlagAction("아무 것도 하지 않기", {})
+        
+        action_type = current_item.data(0, Qt.UserRole)
+        if not action_type:
+            return FlagAction("아무 것도 하지 않기", {})
+        
         params = {}
         
         if action_type == "아무 것도 하지 않기":
