@@ -538,13 +538,19 @@ class ActionDialog(QDialog):
             if isinstance(source_widget, QTreeWidget):
                 current_item = source_widget.currentItem()
                 if current_item:
-                    source_data = current_item.data(0, Qt.UserRole)
-                    item_id = current_item.data(0, Qt.UserRole + 1)
-                    
-                    if source_data and scene_name and scene_name != "(선택 없음)":
-                        params["item_id"] = item_id
-                        params["source_name"] = source_data
-                        params["scene_name"] = scene_name
+                    is_group = current_item.data(0, Qt.UserRole + 2)
+                    if is_group:
+                        # 그룹 노드는 선택 불가
+                        print("⚠️ 그룹 노드는 선택할 수 없습니다.")
+                    else:
+                        # 리프 노드만 선택 가능
+                        source_data = current_item.data(0, Qt.UserRole)
+                        item_id = current_item.data(0, Qt.UserRole + 1)
+                        
+                        if source_data and scene_name and scene_name != "(선택 없음)":
+                            params["item_id"] = item_id
+                            params["source_name"] = source_data
+                            params["scene_name"] = scene_name
             # QComboBox인 경우 (레거시)
             elif isinstance(source_widget, QComboBox):
                 source_data = source_widget.currentData()
@@ -593,7 +599,7 @@ class ActionDialog(QDialog):
         return FlagAction(action_type, params)
     
     def _on_scene_changed_for_source(self, scene_name: str):
-        """장면 변경 시 소스 목록 업데이트 (소스 표시/숨김용) - 트리 구조"""
+        """장면 변경 시 소스 목록 업데이트 (소스 표시/숨김용) - 트리 구조 (그룹/리프 구분)"""
         if "source" not in self.param_widgets:
             return
         
@@ -615,16 +621,17 @@ class ActionDialog(QDialog):
                 return
             
             # 트리 구조로 소스 목록 구성
-            # parentGroup 정보를 사용하여 부모-자식 관계 구성
-            source_to_item = {}  # {source_name: QTreeWidgetItem}
+            # 그룹과 실제 소스를 명확히 구분
+            source_to_item = {}  # {source_name: {'item': QTreeWidgetItem, 'parent_group': str, 'item_id': int, 'is_group': bool}}
             root_items = []
             
-            # 먼저 모든 아이템을 생성 (부모-자식 관계는 나중에 설정)
+            # 1단계: 모든 아이템 생성 (그룹과 리프 구분)
             for item in items:
                 source_name = item.get('sourceName', '')
                 item_id = item.get('itemId', 0)
                 is_group = item.get('isGroup', False)
                 parent_group = item.get('parentGroup')
+                depth = item.get('depth', 0)
                 
                 if not source_name:
                     continue
@@ -636,21 +643,29 @@ class ActionDialog(QDialog):
                 tree_item.setData(0, Qt.UserRole + 1, item_id)  # item_id 저장
                 tree_item.setData(0, Qt.UserRole + 2, is_group)  # is_group 저장
                 
-                # 그룹인 경우 폴더 아이콘 표시를 위한 플래그 설정
-                # (실제 아이콘은 QTreeWidget의 기본 폴더 아이콘 사용)
+                # 그룹 노드와 리프 노드 구분
                 if is_group:
-                    # 그룹은 자식이 있을 수 있으므로 expandable로 표시
+                    # 그룹 노드: 펼치기/접기 가능, 선택 불가
                     tree_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
+                    tree_item.setFlags(Qt.ItemIsEnabled)  # 선택 불가
+                else:
+                    # 리프 노드: 선택 가능
+                    tree_item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
+                    tree_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 
                 source_to_item[source_name] = {
                     'item': tree_item,
                     'parent_group': parent_group,
                     'item_id': item_id,
-                    'is_group': is_group
+                    'is_group': is_group,
+                    'depth': depth
                 }
             
-            # 부모-자식 관계 설정
-            for source_name, item_info in source_to_item.items():
+            # 2단계: 부모-자식 관계 설정 (depth 기반으로 정렬하여 처리)
+            # depth가 작은 것부터 처리 (부모를 먼저 처리)
+            sorted_items = sorted(source_to_item.items(), key=lambda x: x[1]['depth'])
+            
+            for source_name, item_info in sorted_items:
                 tree_item = item_info['item']
                 parent_group = item_info['parent_group']
                 
@@ -662,10 +677,10 @@ class ActionDialog(QDialog):
                     # 부모가 없으면 루트 아이템
                     root_items.append(tree_item)
             
-            # 루트 아이템들을 트리에 추가
+            # 3단계: 루트 아이템들을 트리에 추가
             source_tree.addTopLevelItems(root_items)
             
-            # 모든 아이템 펼치기 (재귀적으로)
+            # 4단계: 모든 아이템 펼치기 (재귀적으로)
             def expand_items(item):
                 if item.childCount() > 0:
                     item.setExpanded(True)
@@ -675,12 +690,24 @@ class ActionDialog(QDialog):
             for i in range(source_tree.topLevelItemCount()):
                 expand_items(source_tree.topLevelItem(i))
             
+            # 5단계: 그룹 노드 선택 방지
+            source_tree.itemSelectionChanged.connect(lambda: self._prevent_group_selection(source_tree))
+            
             source_tree.setEnabled(True)
         except Exception as e:
             print(f"⚠️ 소스 목록 로드 실패: {e}")
             import traceback
             traceback.print_exc()
             source_tree.setEnabled(False)
+    
+    def _prevent_group_selection(self, tree: QTreeWidget):
+        """그룹 노드 선택 방지"""
+        current_item = tree.currentItem()
+        if current_item:
+            is_group = current_item.data(0, Qt.UserRole + 2)
+            if is_group:
+                # 그룹 노드 선택 시 선택 해제
+                tree.clearSelection()
     
     def _on_source_tree_selection_changed(self):
         """소스 트리 선택 변경 시"""
