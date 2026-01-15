@@ -168,9 +168,22 @@ class ActionDialog(QDialog):
                 action_item.setText(0, action_type)
                 action_item.setData(0, Qt.UserRole, action_type)  # action_type 저장
                 action_item.setData(0, Qt.UserRole + 1, False)  # is_group = False
+                # 디버깅: 추가된 동작 확인
+                print(f"✅ 동작 추가: 그룹={group_name}, 동작={action_type}")
         
         # 모든 그룹 펼치기
         self.action_type_tree.expandAll()
+        
+        # 디버깅: 트리 구조 확인
+        print(f"📊 동작 트리 구성 완료: is_upper={is_upper}, 그룹 수={self.action_type_tree.topLevelItemCount()}")
+        for i in range(self.action_type_tree.topLevelItemCount()):
+            group_item = self.action_type_tree.topLevelItem(i)
+            group_name = group_item.text(0)
+            child_count = group_item.childCount()
+            print(f"  - 그룹 '{group_name}': 자식 {child_count}개")
+            for j in range(child_count):
+                child = group_item.child(j)
+                print(f"    - {child.text(0)}")
     
     def _on_tree_action_selection_changed(self):
         """트리에서 동작 선택 변경 시"""
@@ -419,12 +432,24 @@ class ActionDialog(QDialog):
                     source_name = params.get("source_name", "")
                     item_id = params.get("item_id", 0)
                     
-                    # 트리에서 해당 소스 찾기
+                    # 트리에서 해당 소스 찾기 (그룹 노드 제외)
                     def find_item(parent_item):
                         for i in range(parent_item.childCount()):
                             child = parent_item.child(i)
+                            
+                            # 그룹 노드는 건너뛰기 (UserRole이 None이거나 childCount > 0)
+                            if child.childCount() > 0:
+                                # 그룹이면 재귀적으로 자식 검색
+                                if find_item(child):
+                                    return True
+                                continue
+                            
                             child_source = child.data(0, Qt.UserRole)
                             child_item_id = child.data(0, Qt.UserRole + 1)
+                            
+                            # 그룹은 UserRole이 None이므로 source_name이 None이면 건너뛰기
+                            if child_source is None:
+                                continue
                             
                             if (source_name and child_source == source_name) or (item_id and child_item_id == item_id):
                                 source_widget.setCurrentItem(child)
@@ -438,8 +463,20 @@ class ActionDialog(QDialog):
                     # 루트 아이템들에서 검색
                     for i in range(source_widget.topLevelItemCount()):
                         root_item = source_widget.topLevelItem(i)
+                        
+                        # 그룹 노드는 건너뛰기
+                        if root_item.childCount() > 0:
+                            # 그룹이면 재귀적으로 자식 검색
+                            if find_item(root_item):
+                                break
+                            continue
+                        
                         root_source = root_item.data(0, Qt.UserRole)
                         root_item_id = root_item.data(0, Qt.UserRole + 1)
+                        
+                        # 그룹은 UserRole이 None이므로 source_name이 None이면 건너뛰기
+                        if root_source is None:
+                            continue
                         
                         if (source_name and root_source == source_name) or (item_id and root_item_id == item_id):
                             source_widget.setCurrentItem(root_item)
@@ -538,19 +575,31 @@ class ActionDialog(QDialog):
             if isinstance(source_widget, QTreeWidget):
                 current_item = source_widget.currentItem()
                 if current_item:
+                    # childCount() > 0이면 그룹 (자식을 가짐) - 선택 불가
+                    if current_item.childCount() > 0:
+                        print("⚠️ 그룹 노드는 선택할 수 없습니다.")
+                        return
+                    
+                    # is_group 플래그 확인
                     is_group = current_item.data(0, Qt.UserRole + 2)
                     if is_group:
                         # 그룹 노드는 선택 불가
                         print("⚠️ 그룹 노드는 선택할 수 없습니다.")
-                    else:
-                        # 리프 노드만 선택 가능
-                        source_data = current_item.data(0, Qt.UserRole)
-                        item_id = current_item.data(0, Qt.UserRole + 1)
-                        
-                        if source_data and scene_name and scene_name != "(선택 없음)":
-                            params["item_id"] = item_id
-                            params["source_name"] = source_data
-                            params["scene_name"] = scene_name
+                        return
+                    
+                    # 리프 노드만 선택 가능 - UserRole에 source_name이 있어야 함
+                    source_data = current_item.data(0, Qt.UserRole)
+                    item_id = current_item.data(0, Qt.UserRole + 1)
+                    
+                    # 그룹은 UserRole이 None이므로 source_data가 None이면 그룹
+                    if source_data is None:
+                        print("⚠️ 그룹 노드는 선택할 수 없습니다.")
+                        return
+                    
+                    if source_data and scene_name and scene_name != "(선택 없음)":
+                        params["item_id"] = item_id
+                        params["source_name"] = source_data
+                        params["scene_name"] = scene_name
             # QComboBox인 경우 (레거시)
             elif isinstance(source_widget, QComboBox):
                 source_data = source_widget.currentData()
@@ -622,11 +671,14 @@ class ActionDialog(QDialog):
             
             # 트리 구조로 소스 목록 구성
             # 그룹과 실제 소스를 명확히 구분
-            source_to_item = {}  # {source_name: {'item': QTreeWidgetItem, 'parent_group': str, 'item_id': int, 'is_group': bool}}
+            source_to_item = {}  # {source_name: {'item': QTreeWidgetItem, 'parent_group': str, 'item_id': int, 'is_group': bool, 'depth': int}}
             root_items = []
             
             # 1단계: 모든 아이템 생성 (그룹과 리프 구분)
-            for item in items:
+            # depth가 작은 것부터 처리 (부모를 먼저 생성)
+            sorted_items = sorted(items, key=lambda x: x.get('depth', 0))
+            
+            for item in sorted_items:
                 source_name = item.get('sourceName', '')
                 item_id = item.get('itemId', 0)
                 is_group = item.get('isGroup', False)
@@ -639,20 +691,36 @@ class ActionDialog(QDialog):
                 # 트리 아이템 생성
                 tree_item = QTreeWidgetItem()
                 tree_item.setText(0, source_name)
-                tree_item.setData(0, Qt.UserRole, source_name)  # source_name 저장
-                tree_item.setData(0, Qt.UserRole + 1, item_id)  # item_id 저장
-                tree_item.setData(0, Qt.UserRole + 2, is_group)  # is_group 저장
                 
                 # 그룹 노드와 리프 노드 구분
                 if is_group:
-                    # 그룹 노드: 펼치기/접기 가능, 선택 불가
-                    tree_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
-                    tree_item.setFlags(Qt.ItemIsEnabled)  # 선택 불가
+                    # 그룹 노드: 펼치기/접기 가능, 선택 불가, UserRole = None
+                    tree_item.setData(0, Qt.UserRole, None)  # 그룹은 UserRole에 None
+                    tree_item.setData(0, Qt.UserRole + 1, None)  # item_id도 None
+                    tree_item.setData(0, Qt.UserRole + 2, True)  # is_group = True
+                    tree_item.setFlags(Qt.ItemIsEnabled)  # 선택 불가 - ItemIsSelectable 절대 사용 금지
+                    # 그룹은 자식을 가진 후에 ShowIndicator 설정됨
                 else:
-                    # 리프 노드: 선택 가능
+                    # 리프 노드: 선택 가능, UserRole에 action 데이터 저장
+                    tree_item.setData(0, Qt.UserRole, source_name)  # source_name 저장
+                    tree_item.setData(0, Qt.UserRole + 1, item_id)  # item_id 저장
+                    tree_item.setData(0, Qt.UserRole + 2, False)  # is_group = False
                     tree_item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
                     tree_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 
+                # 부모-자식 관계 설정
+                if parent_group and parent_group in source_to_item:
+                    # 부모 그룹이 있으면 부모의 자식으로 추가
+                    parent_item = source_to_item[parent_group]['item']
+                    parent_item.addChild(tree_item)
+                    # 부모 그룹이 자식을 가지므로 펼치기 표시 활성화 (자식을 추가한 후에 설정)
+                    if parent_item.childCount() > 0:
+                        parent_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
+                else:
+                    # 부모가 없으면 루트 아이템
+                    root_items.append(tree_item)
+                
+                # 딕셔너리에 저장 (나중에 다른 아이템이 이 아이템을 부모로 참조할 수 있음)
                 source_to_item[source_name] = {
                     'item': tree_item,
                     'parent_group': parent_group,
@@ -661,24 +729,20 @@ class ActionDialog(QDialog):
                     'depth': depth
                 }
             
-            # 2단계: 부모-자식 관계 설정 (depth 기반으로 정렬하여 처리)
-            # depth가 작은 것부터 처리 (부모를 먼저 처리)
-            sorted_items = sorted(source_to_item.items(), key=lambda x: x[1]['depth'])
-            
-            for source_name, item_info in sorted_items:
-                tree_item = item_info['item']
-                parent_group = item_info['parent_group']
-                
-                if parent_group and parent_group in source_to_item:
-                    # 부모 그룹이 있으면 부모의 자식으로 추가
-                    parent_item = source_to_item[parent_group]['item']
-                    parent_item.addChild(tree_item)
-                else:
-                    # 부모가 없으면 루트 아이템
-                    root_items.append(tree_item)
-            
-            # 3단계: 루트 아이템들을 트리에 추가
+            # 2단계: 루트 아이템들을 트리에 추가
             source_tree.addTopLevelItems(root_items)
+            
+            # 3단계: 그룹 노드에 ShowIndicator 설정 (자식을 가진 그룹만)
+            def set_group_indicators(item):
+                """재귀적으로 그룹 노드에 ShowIndicator 설정"""
+                is_group = item.data(0, Qt.UserRole + 2)
+                if is_group and item.childCount() > 0:
+                    item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
+                for i in range(item.childCount()):
+                    set_group_indicators(item.child(i))
+            
+            for i in range(source_tree.topLevelItemCount()):
+                set_group_indicators(source_tree.topLevelItem(i))
             
             # 4단계: 모든 아이템 펼치기 (재귀적으로)
             def expand_items(item):
@@ -701,9 +765,15 @@ class ActionDialog(QDialog):
             source_tree.setEnabled(False)
     
     def _prevent_group_selection(self, tree: QTreeWidget):
-        """그룹 노드 선택 방지"""
+        """그룹 노드 선택 방지 - childCount() > 0이거나 is_group이면 선택 해제"""
         current_item = tree.currentItem()
         if current_item:
+            # childCount() > 0이면 그룹 (자식을 가짐)
+            if current_item.childCount() > 0:
+                tree.clearSelection()
+                return
+            
+            # is_group 플래그 확인
             is_group = current_item.data(0, Qt.UserRole + 2)
             if is_group:
                 # 그룹 노드 선택 시 선택 해제

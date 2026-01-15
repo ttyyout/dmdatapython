@@ -4,7 +4,7 @@
 """
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, QLabel,
-    QPushButton, QListWidget, QLineEdit, QComboBox, QGroupBox, QTextEdit,
+    QPushButton, QListWidget, QListWidgetItem, QLineEdit, QComboBox, QGroupBox, QTextEdit,
     QCheckBox, QDoubleSpinBox, QDialogButtonBox, QFrame, QScrollArea
 )
 from PySide6.QtCore import Qt
@@ -146,7 +146,8 @@ class FlagSystemSettingsWindow(QDialog):
         left_panel.addWidget(QLabel("플래그 목록"))
         
         flag_list = QListWidget()
-        flag_list.currentItemChanged.connect(lambda: self._on_flag_selected(flag_list, is_upper))
+        # currentItemChanged는 (current, previous) 두 인자를 전달함 - 시그니처 맞춤
+        flag_list.currentItemChanged.connect(lambda current, previous: self._on_flag_selected(flag_list, is_upper))
         left_panel.addWidget(flag_list)
         
         # 각 탭의 플래그 목록 저장
@@ -160,8 +161,9 @@ class FlagSystemSettingsWindow(QDialog):
             flag_list.clear()
             flags_dict = self.flag_system.upper_flags if is_upper else self.flag_system.lower_flags
             for flag_id, flag in flags_dict.items():
-                item = flag_list.addItem(flag.name)
+                item = QListWidgetItem(flag.name)
                 item.setData(Qt.UserRole, flag_id)  # flag_id 저장
+                flag_list.addItem(item)
         
         populate_flag_list()
         
@@ -183,7 +185,8 @@ class FlagSystemSettingsWindow(QDialog):
         name_layout = QHBoxLayout()
         name_layout.addWidget(QLabel("플래그 이름:"))
         flag_name_edit = QLineEdit()
-        flag_name_edit.textChanged.connect(lambda text: self._on_flag_name_changed(text, is_upper))
+        # 이름 변경 시 _load_flags() 호출하지 않음 - 무한 루프 방지
+        flag_name_edit.textChanged.connect(lambda text: self._on_flag_name_changed(text, is_upper, flag_list))
         name_layout.addWidget(flag_name_edit)
         right_panel.addLayout(name_layout)
         
@@ -345,7 +348,8 @@ class FlagSystemSettingsWindow(QDialog):
         left_panel.addWidget(QLabel("플래그 목록"))
         
         flag_list = QListWidget()
-        flag_list.currentItemChanged.connect(lambda: self._on_flag_selected_for_action(flag_list, is_upper))
+        # currentItemChanged는 (current, previous) 두 인자를 전달함 - 시그니처 맞춤
+        flag_list.currentItemChanged.connect(lambda current, previous: self._on_flag_selected_for_action(flag_list, is_upper))
         left_panel.addWidget(flag_list)
         
         layout.addLayout(left_panel, 1)
@@ -415,8 +419,9 @@ class FlagSystemSettingsWindow(QDialog):
                 return
             list_widget.clear()
             for flag_id, flag in flags_dict.items():
-                item = list_widget.addItem(flag.name)
+                item = QListWidgetItem(flag.name)
                 item.setData(Qt.UserRole, flag_id)  # flag_id 저장
+                list_widget.addItem(item)
         
         # 상위 플래그
         if hasattr(self, 'upper_flag_list') and self.upper_flag_list:
@@ -460,17 +465,8 @@ class FlagSystemSettingsWindow(QDialog):
             print("⚠️ 삭제할 플래그가 선택되지 않았습니다.")
             return
         
-        # UserRole에서 flag_id 직접 읽기
+        # UserRole에서 flag_id 직접 읽기 - name 기반 탐색 제거
         deleted_flag_id = current_item.data(Qt.UserRole)
-        if not deleted_flag_id:
-            # 레거시: 이름으로 찾기
-            flag_name = current_item.text()
-            flags_dict = self.flag_system.upper_flags if is_upper else self.flag_system.lower_flags
-            for flag_id, flag in flags_dict.items():
-                if flag.name == flag_name:
-                    deleted_flag_id = flag_id
-                    break
-        
         if not deleted_flag_id:
             print(f"⚠️ 플래그 ID를 찾을 수 없습니다: {current_item.text()}")
             return
@@ -526,8 +522,10 @@ class FlagSystemSettingsWindow(QDialog):
                 self.upper_priority_combo.setCurrentIndex(0)  # 자동으로 설정
             
             if hasattr(self, 'upper_linked_active_checkboxes') and self.upper_linked_active_checkboxes:
+                # QCheckBox 인스턴스만 처리 - UI 보조 객체 제외
                 for checkbox in self.upper_linked_active_checkboxes.values():
-                    checkbox.setChecked(False)
+                    if isinstance(checkbox, QCheckBox):
+                        checkbox.setChecked(False)
             
             if hasattr(self, 'upper_flag_name_edit') and self.upper_flag_name_edit:
                 self.upper_flag_name_edit.clear()
@@ -570,7 +568,7 @@ class FlagSystemSettingsWindow(QDialog):
             ]
     
     def _on_flag_selected(self, flag_list: QListWidget, is_upper: bool):
-        """플래그 선택 시 - 방어 코드 추가"""
+        """플래그 선택 시 - flag_id 기반으로 찾기"""
         current_item = flag_list.currentItem()
         if not current_item:
             # 선택 해제 시 UI 초기화
@@ -583,16 +581,15 @@ class FlagSystemSettingsWindow(QDialog):
                     self.lower_flag_name_edit.clear()
             return
         
-        flag_name = current_item.text()
-        flags_dict = self.flag_system.upper_flags if is_upper else self.flag_system.lower_flags
+        # flag_id로 직접 찾기 - name 기반 탐색 제거
+        flag_id = current_item.data(Qt.UserRole)
+        if not flag_id:
+            flag_list.clearSelection()
+            self.current_flag = None
+            return
         
-        # 플래그 찾기 (방어 코드: 존재하지 않는 플래그 ID 참조 방지)
-        selected_flag = None
-        for flag in flags_dict.values():
-            if flag.name == flag_name:
-                selected_flag = flag
-                break
-        
+        # flag_system.get_flag() 사용 - flag_id로 직접 찾기
+        selected_flag = self.flag_system.get_flag(flag_id)
         if not selected_flag:
             # 플래그를 찾지 못한 경우 (삭제되었을 수 있음)
             flag_list.clearSelection()
@@ -602,7 +599,10 @@ class FlagSystemSettingsWindow(QDialog):
         self.current_flag = selected_flag
         flag_name_edit = self.upper_flag_name_edit if is_upper else self.lower_flag_name_edit
         if flag_name_edit:
+            # textChanged 시그널을 일시적으로 차단하여 무한 루프 방지
+            flag_name_edit.blockSignals(True)
             flag_name_edit.setText(selected_flag.name)
+            flag_name_edit.blockSignals(False)
         
         # 우선순위 설정 (상위 플래그만)
         if is_upper and hasattr(self, 'upper_priority_combo') and self.upper_priority_combo:
@@ -617,7 +617,9 @@ class FlagSystemSettingsWindow(QDialog):
         # 상위 플래그: EARTHQUAKE_ACTIVE 체크박스 업데이트
         if is_upper and hasattr(self, 'upper_linked_active_checkboxes') and self.upper_linked_active_checkboxes:
             for active_id, checkbox in self.upper_linked_active_checkboxes.items():
-                checkbox.setChecked(active_id in selected_flag.linked_active_ids)
+                # QCheckBox 인스턴스만 처리
+                if isinstance(checkbox, QCheckBox):
+                    checkbox.setChecked(active_id in selected_flag.linked_active_ids)
         
         # 조건 목록 업데이트 (하위 플래그만)
         if not is_upper:
@@ -637,36 +639,55 @@ class FlagSystemSettingsWindow(QDialog):
                     off_list.addItem(condition_text)
     
     def _on_flag_selected_for_action(self, flag_list: QListWidget, is_upper: bool):
-        """동작 탭에서 플래그 선택 시"""
+        """동작 탭에서 플래그 선택 시 - flag_id 기반으로 찾기"""
         current_item = flag_list.currentItem()
         if not current_item:
             return
         
-        flag_name = current_item.text()
-        flags_dict = self.flag_system.upper_flags if is_upper else self.flag_system.lower_flags
+        # flag_id로 직접 찾기 - name 기반 탐색 제거
+        flag_id = current_item.data(Qt.UserRole)
+        if not flag_id:
+            return
         
-        for flag in flags_dict.values():
-            if flag.name == flag_name:
-                self.current_flag = flag
-                
-                # 동작 목록 업데이트
-                on_list = self.upper_on_actions_list if is_upper else self.lower_on_actions_list
-                off_list = self.upper_off_actions_list if is_upper else self.lower_off_actions_list
-                
-                on_list.clear()
-                for action in flag.on_actions:
-                    on_list.addItem(f"{action.action_type}: {action.params}")
-                
-                off_list.clear()
-                for action in flag.off_actions:
-                    off_list.addItem(f"{action.action_type}: {action.params}")
-                break
+        # flag_system.get_flag() 사용 - flag_id로 직접 찾기
+        selected_flag = self.flag_system.get_flag(flag_id)
+        if not selected_flag:
+            return
+        
+        self.current_flag = selected_flag
+        
+        # 동작 목록 업데이트
+        on_list = self.upper_on_actions_list if is_upper else self.lower_on_actions_list
+        off_list = self.upper_off_actions_list if is_upper else self.lower_off_actions_list
+        
+        on_list.clear()
+        for action in selected_flag.on_actions:
+            on_list.addItem(f"{action.action_type}: {action.params}")
+        
+        off_list.clear()
+        for action in selected_flag.off_actions:
+            off_list.addItem(f"{action.action_type}: {action.params}")
     
-    def _on_flag_name_changed(self, text: str, is_upper: bool):
-        """플래그 이름 변경"""
-        if self.current_flag:
-            self.current_flag.name = text
-            self._load_flags()
+    def _on_flag_name_changed(self, text: str, is_upper: bool, flag_list: QListWidget):
+        """플래그 이름 변경 - _load_flags() 호출하지 않음, 현재 아이템의 text만 갱신"""
+        if not self.current_flag:
+            return
+        
+        # 무한 루프 방지 가드: 현재 선택된 아이템이 없으면 무시
+        current_item = flag_list.currentItem()
+        if not current_item:
+            return
+        
+        # flag_id 확인 - 현재 선택된 플래그와 일치하는지 확인
+        flag_id = current_item.data(Qt.UserRole)
+        if flag_id != self.current_flag.flag_id:
+            return
+        
+        # 이름 변경
+        self.current_flag.name = text
+        
+        # 현재 선택된 아이템의 text만 갱신 - _load_flags() 호출하지 않음
+        current_item.setText(text)
     
     def _on_priority_changed(self, priority, is_upper: bool):
         """우선순위 변경 (상위 플래그만)"""
@@ -816,7 +837,8 @@ class FlagSystemSettingsWindow(QDialog):
         left_panel.addWidget(QLabel("인스턴스 종류 목록"))
         
         type_list = QListWidget()
-        type_list.currentItemChanged.connect(self._on_instance_type_selected)
+        # currentItemChanged는 (current, previous) 두 인자를 전달함 - 시그니처 맞춤
+        type_list.currentItemChanged.connect(lambda current, previous: self._on_instance_type_selected())
         left_panel.addWidget(type_list)
         
         type_buttons = QHBoxLayout()
@@ -903,7 +925,8 @@ class FlagSystemSettingsWindow(QDialog):
         left_panel.addWidget(QLabel("EARTHQUAKE_ACTIVE 목록"))
         
         active_list = QListWidget()
-        active_list.currentItemChanged.connect(self._on_active_config_selected)
+        # currentItemChanged는 (current, previous) 두 인자를 전달함 - 시그니처 맞춤
+        active_list.currentItemChanged.connect(lambda current, previous: self._on_active_config_selected())
         left_panel.addWidget(active_list)
         
         active_buttons = QHBoxLayout()
@@ -1121,9 +1144,9 @@ class FlagSystemSettingsWindow(QDialog):
                 self.current_active_config = active_config
                 self.active_config_name_edit.setText(active_config.name)
                 
-                # 체크박스 업데이트 (존재하는 체크박스만 업데이트)
+                # 체크박스 업데이트 - QCheckBox 인스턴스만 처리
                 for type_id, checkbox in self.active_aggregated_checkboxes.items():
-                    if type_id != '_scroll_area' and type_id in self.instance_system.instance_types:
+                    if isinstance(checkbox, QCheckBox) and type_id in self.instance_system.instance_types:
                         checkbox.setChecked(type_id in active_config.aggregated_instance_types)
                 break
     
