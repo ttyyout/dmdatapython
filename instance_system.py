@@ -20,6 +20,11 @@ class EarthquakeInstance:
         self.created_at = created_at  # 생성 시간
         self.is_active = True  # 활성 상태
         self.ended_at: Optional[float] = None  # 종료 시간
+        self.last_update_time: float = created_at  # 마지막 정보 수신 시간 (무감지진 조건용)
+    
+    def update_last_info_time(self, update_time: float):
+        """지진 정보 수신 시 마지막 업데이트 시간 갱신"""
+        self.last_update_time = update_time
     
     def end(self, ended_at: float):
         """인스턴스 종료"""
@@ -34,7 +39,8 @@ class EarthquakeInstance:
             "event_id": self.event_id,
             "created_at": self.created_at,
             "is_active": self.is_active,
-            "ended_at": self.ended_at
+            "ended_at": self.ended_at,
+            "last_update_time": self.last_update_time
         }
     
     @classmethod
@@ -48,6 +54,7 @@ class EarthquakeInstance:
         )
         instance.is_active = data.get("is_active", True)
         instance.ended_at = data.get("ended_at")
+        instance.last_update_time = data.get("last_update_time", data["created_at"])
         return instance
 
 class InstanceTypeConfig:
@@ -170,9 +177,11 @@ class InstanceSystem(QObject):
     def trigger_event(self, event_type: str, event_data: Dict):
         """외부 이벤트 트리거 (EEW, 지진정보 등)"""
         import time
+        current_time = time.time()
+        
         # 타임스탬프 추가
         event_data_with_timestamp = event_data.copy()
-        event_data_with_timestamp["_timestamp"] = time.time()
+        event_data_with_timestamp["_timestamp"] = current_time
         
         # 최근 이벤트 기록 (최대 10개 유지)
         if event_type not in self.recent_events:
@@ -180,6 +189,20 @@ class InstanceSystem(QObject):
         self.recent_events[event_type].append(event_data_with_timestamp)
         if len(self.recent_events[event_type]) > 10:
             self.recent_events[event_type].pop(0)
+        
+        # 이벤트 데이터에서 event_id 추출
+        event_id = event_data.get("event_id")
+        if event_id:
+            # 해당 event_id의 활성 인스턴스 찾아서 last_update_time 갱신
+            for instance in self.instances.values():
+                if instance.event_id == event_id and instance.is_active:
+                    # 지진 관련 정보 수신 시 마지막 업데이트 시간 갱신
+                    # EEW, 진도속보, 진원정보, 진원진도정보, 해일정보 등
+                    if event_type in ["EEW_STARTED", "EEW_UPDATED", "EEW_FINAL", "EEW_CANCELED", "EEW_WARNING",
+                                      "SOKUHOU_RECEIVED", "EPICENTER_RECEIVED", "DETAIL_RECEIVED",
+                                      "TSUNAMI_RECEIVED", "TSUNAMI_CANCELED"]:
+                        instance.update_last_info_time(current_time)
+                        print(f"🔄 인스턴스 정보 갱신: {instance.instance_id} (Event ID: {event_id}, 시간: {current_time})")
         
         # flag_system에도 이벤트 전달 (하위 플래그 조건 평가용)
         if self.flag_system:
@@ -272,59 +295,105 @@ class InstanceSystem(QObject):
                 print(f"🔄 EARTHQUAKE_ACTIVE 상태 변경: {active_id} = {has_active}")
     
     def _check_condition(self, condition: FlagCondition, instance: Optional[EarthquakeInstance]) -> bool:
-        """조건 확인 (FlagCondition과 동일한 로직)"""
+        """조건 확인 (FlagCondition과 동일한 로직)
+        
+        instance가 제공된 경우, 해당 인스턴스의 event_id와 일치하는 이벤트만 확인
+        """
         condition_type = condition.condition_type
         params = condition.params
+        
+        # instance가 있으면 event_id 필터링
+        target_event_id = instance.event_id if instance else None
         
         # EEW 이벤트 조건
         if condition_type == "EEW 신규 발표":
             if "EEW_STARTED" in self.recent_events and self.recent_events["EEW_STARTED"]:
                 event_data = self.recent_events["EEW_STARTED"][-1]
+                # event_id 매칭 확인
+                if target_event_id and event_data.get("event_id") != target_event_id:
+                    return False
                 if event_data.get("is_new", False):
                     return self._check_eew_condition(params, event_data, "신규 발표")
         
         elif condition_type == "EEW 속보 발표":
             if "EEW_UPDATED" in self.recent_events and self.recent_events["EEW_UPDATED"]:
                 event_data = self.recent_events["EEW_UPDATED"][-1]
+                # event_id 매칭 확인
+                if target_event_id and event_data.get("event_id") != target_event_id:
+                    return False
                 if not event_data.get("is_new", False):
                     return self._check_eew_condition(params, event_data, "속보 발표")
         
         elif condition_type == "EEW 취소보":
             if "EEW_CANCELED" in self.recent_events and self.recent_events["EEW_CANCELED"]:
                 event_data = self.recent_events["EEW_CANCELED"][-1]
+                # event_id 매칭 확인
+                if target_event_id and event_data.get("event_id") != target_event_id:
+                    return False
                 if event_data.get("is_canceled", False):
                     return self._check_eew_condition(params, event_data, "취소보")
         
         # 지진상세정보 이벤트 조건
         elif condition_type == "진원진도정보 수신":
             if "DETAIL_RECEIVED" in self.recent_events and self.recent_events["DETAIL_RECEIVED"]:
+                event_data = self.recent_events["DETAIL_RECEIVED"][-1]
+                # event_id 매칭 확인
+                if target_event_id and event_data.get("event_id") != target_event_id:
+                    return False
                 return True
         
         elif condition_type == "진도속보 수신":
             if "SOKUHOU_RECEIVED" in self.recent_events and self.recent_events["SOKUHOU_RECEIVED"]:
+                event_data = self.recent_events["SOKUHOU_RECEIVED"][-1]
+                # event_id 매칭 확인
+                if target_event_id and event_data.get("event_id") != target_event_id:
+                    return False
                 return True
         
         elif condition_type == "진원정보 수신":
             if "EPICENTER_RECEIVED" in self.recent_events and self.recent_events["EPICENTER_RECEIVED"]:
+                event_data = self.recent_events["EPICENTER_RECEIVED"][-1]
+                # event_id 매칭 확인
+                if target_event_id and event_data.get("event_id") != target_event_id:
+                    return False
                 return True
         
         # 해일정보 이벤트 조건
         elif condition_type == "해일정보 발표":
             if "TSUNAMI_RECEIVED" in self.recent_events and self.recent_events["TSUNAMI_RECEIVED"]:
                 event_data = self.recent_events["TSUNAMI_RECEIVED"][-1]
+                # event_id 매칭 확인
+                if target_event_id and event_data.get("event_id") != target_event_id:
+                    return False
                 if not event_data.get("is_canceled", False):
                     return True
         
         elif condition_type == "해일정보 취소":
             if "TSUNAMI_CANCELED" in self.recent_events and self.recent_events["TSUNAMI_CANCELED"]:
                 event_data = self.recent_events["TSUNAMI_CANCELED"][-1]
+                # event_id 매칭 확인
+                if target_event_id and event_data.get("event_id") != target_event_id:
+                    return False
                 if event_data.get("is_canceled", False):
                     return True
         
-        # 무감지진 조건 (추가)
+        # 무감지진 조건
         elif condition_type == "무감지진":
-            # 무감지진은 특별 처리 (추후 구현)
-            return False
+            # instance가 없으면 False (인스턴스별로 판단)
+            if not instance:
+                return False
+            
+            # 현재 시각과 마지막 업데이트 시간 비교
+            # condition.delay가 무감지 시간(초)을 의미
+            import time
+            current_time = time.time()
+            elapsed_time = current_time - instance.last_update_time
+            delay_seconds = condition.delay
+            
+            # 경과 시간이 설정된 delay 시간 이상이면 무감지진 조건 만족
+            if elapsed_time >= delay_seconds:
+                print(f"⏰ 무감지진 조건 만족: {instance.instance_id} (경과: {elapsed_time:.1f}초 >= {delay_seconds}초)")
+                return True
         
         return False
     

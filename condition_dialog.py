@@ -70,7 +70,8 @@ class ConditionDialog(QDialog):
             "진도속보 수신",
             "진원정보 수신",
             "해일정보 발표",
-            "해일정보 취소"
+            "해일정보 취소",
+            "무감지진"
         ])
         self.condition_type_combo.currentTextChanged.connect(self._on_type_changed)
         type_layout.addWidget(self.condition_type_combo)
@@ -86,16 +87,26 @@ class ConditionDialog(QDialog):
         # 파라미터 위젯들
         self.param_widgets = {}
         
-        # 지연 시간
-        delay_group = QGroupBox("지연 시간")
-        delay_layout = QHBoxLayout()
-        delay_layout.addWidget(QLabel("조건 만족 후"))
+        # 지연 시간 (무감지진의 경우 무감지 시간을 의미)
+        delay_group = QGroupBox("지연 시간 / 무감지 시간")
+        delay_layout = QVBoxLayout()
+        delay_desc = QLabel("")
+        delay_desc.setWordWrap(True)
+        delay_desc.setStyleSheet("color: #aaa; font-size: 9pt; padding: 5px;")
+        delay_layout.addWidget(delay_desc)
+        
+        delay_input_layout = QHBoxLayout()
+        delay_input_layout.addWidget(QLabel("시간:"))
         self.delay_spin = QDoubleSpinBox()
         self.delay_spin.setRange(0.0, 3600.0)
-        self.delay_spin.setSuffix(" 초 후 실행")
+        self.delay_spin.setSuffix(" 초")
         self.delay_spin.setValue(0.0)
-        delay_layout.addWidget(self.delay_spin)
-        delay_layout.addStretch()
+        delay_input_layout.addWidget(self.delay_spin)
+        delay_input_layout.addStretch()
+        delay_layout.addLayout(delay_input_layout)
+        
+        # 조건 타입에 따라 설명 변경
+        self.delay_desc_label = delay_desc
         delay_group.setLayout(delay_layout)
         layout.addWidget(delay_group)
         
@@ -174,6 +185,28 @@ class ConditionDialog(QDialog):
             ])
             self.params_layout.addRow("최대 예상 진도 필터:", intensity_combo)
             self.param_widgets["intensity_filter"] = intensity_combo
+        
+        elif condition_type == "무감지진":
+            # 무감지진 조건은 파라미터 없음 (delay 시간만 사용)
+            info_label = QLabel(
+                "무감지진 조건: 마지막 지진 정보 수신 후 지정된 시간 동안\n"
+                "새로운 정보가 수신되지 않으면 조건이 만족됩니다.\n"
+                "지연 시간은 '무감지 시간'을 의미합니다."
+            )
+            info_label.setWordWrap(True)
+            info_label.setStyleSheet("color: #aaa; padding: 10px;")
+            self.params_layout.addRow("", info_label)
+        
+        # delay 설명 업데이트
+        if condition_type == "무감지진":
+            self.delay_desc_label.setText(
+                "무감지 시간: 마지막 지진 정보 수신 후 이 시간 동안\n"
+                "새로운 정보가 없으면 조건이 만족됩니다."
+            )
+        else:
+            self.delay_desc_label.setText(
+                "지연 시간: 조건이 만족된 후 이 시간이 지나면 실행됩니다."
+            )
     
     def _load_condition(self):
         """기존 조건 로드"""

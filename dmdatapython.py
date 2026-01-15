@@ -434,20 +434,37 @@ class BroadcastWindow(QWidget):
         """테스트용 EEW 알림 - 실제 발생 모드와 동일한 코드 경로 사용"""
         test_event_id = f"TEST_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         
-        # EventStateManager를 통해 이벤트 전달 (실제 발생 모드와 동일)
-        if self.event_state_manager:
-            # 실제 발생 모드와 동일하게 EventStateManager.handle_eew 호출
-            self.event_state_manager.handle_eew(
-                event_id=test_event_id,
-                serial_no=1,
-                is_final=False,
-                is_warning=is_warning,
-                is_canceled=False,
-                source="TEST"
-            )
+        # 실제 발생 모드와 완전히 동일한 경로 사용
+        # handle_eew_real_gui와 동일한 방식으로 처리
+        if not self.event_state_manager:
+            print("⚠️ EventStateManager가 설정되지 않았습니다. 테스트를 건너뜁니다.")
+            return
+        
+        # 실제 발생 모드와 동일한 데이터 구조 생성
+        test_earthquake_data = {
+            'display_text': '테스트용 지진 정보입니다. 이것은 긴급지진속보 테스트 메시지입니다.',
+            'serial_no': 1,
+            'is_warning': is_warning,
+            'is_canceled': False,
+            'source': 'TEST',
+            'is_final': False,
+            'final_serial': None
+        }
+        
+        # 실제 발생 모드와 동일하게 EventStateManager.handle_eew 호출
+        # (인스턴스 시스템에 이벤트 전달됨)
+        self.event_state_manager.handle_eew(
+            event_id=test_event_id,
+            serial_no=1,
+            is_final=False,
+            is_warning=is_warning,
+            is_canceled=False,
+            source="TEST"
+        )
         
         # UI 업데이트 (실제 발생 모드와 동일한 방식)
-        test_info_text = "테스트용 지진 정보입니다. 이것은 긴급지진속보 테스트 메시지입니다."
+        # start_eew_alert는 정보 표시용이므로 동일하게 호출
+        test_info_text = test_earthquake_data['display_text']
         self.start_eew_alert(
             test_info_text,
             event_id=test_event_id,
@@ -1642,7 +1659,7 @@ class EventStateManager(QObject):
         # 상태만 업데이트
         self.update_global_flags()
     
-    def handle_eew(self, event_id, serial_no, is_final=False, is_warning=False, is_canceled=False, source="DMDATA"):
+    def handle_eew(self, event_id, serial_no, is_final=False, is_warning=False, is_canceled=False, source="DMDATA", max_intensity=None):
         """긴급지진속보 처리"""
         is_new = event_id not in self.earthquake_states
         
@@ -1685,16 +1702,17 @@ class EventStateManager(QObject):
             
             self.workflow_engine.trigger_event_fact(fact_type, event_data)
         
-        # 플래그 시스템에 이벤트 트리거
-        if hasattr(self, 'flag_system') and self.flag_system:
+        # 인스턴스 시스템에 이벤트 트리거 (우선)
+        if hasattr(self, 'instance_system') and self.instance_system:
             event_data = {
                 'event_id': event_id,
                 'is_new': is_new,
                 'is_warning': is_warning,
                 'is_canceled': is_canceled,
                 'is_final': is_final,
-                'source': source,
-                'max_intensity': None  # EEW 데이터에서 가져와야 함
+                'serial_no': serial_no,
+                'max_intensity': max_intensity,
+                'source': source
             }
             
             if is_canceled:
@@ -1707,6 +1725,37 @@ class EventStateManager(QObject):
                 fact_type = 'EEW_STARTED'
             else:
                 fact_type = 'EEW_UPDATED'
+            
+            if is_warning:
+                self.instance_system.trigger_event('EEW_WARNING', event_data)
+            
+            self.instance_system.trigger_event(fact_type, event_data)
+        
+        # 플래그 시스템에 이벤트 트리거 (하위 플래그 조건 평가용)
+        if hasattr(self, 'flag_system') and self.flag_system:
+            event_data = {
+                'event_id': event_id,
+                'is_new': is_new,
+                'is_warning': is_warning,
+                'is_canceled': is_canceled,
+                'is_final': is_final,
+                'source': source,
+                'max_intensity': max_intensity
+            }
+            
+            if is_canceled:
+                fact_type = 'EEW_CANCELED'
+            elif is_final:
+                fact_type = 'EEW_FINAL'
+            elif is_warning:
+                fact_type = 'EEW_WARNING'
+            elif is_new:
+                fact_type = 'EEW_STARTED'
+            else:
+                fact_type = 'EEW_UPDATED'
+            
+            if is_warning:
+                self.flag_system.trigger_event('EEW_WARNING', event_data)
             
             self.flag_system.trigger_event(fact_type, event_data)
         
@@ -2576,7 +2625,8 @@ class DMDataHandler(QObject):
             
             # 이벤트 상태 관리자에 긴급지진속보 처리
             state_manager = self.detail_window.get_event_state_manager()
-            state_manager.handle_eew(event_id, serial_no, is_final, is_warning, is_canceled, source)
+            max_intensity = earthquake_data.get('max_intensity')
+            state_manager.handle_eew(event_id, serial_no, is_final, is_warning, is_canceled, source, max_intensity)
             # Signal을 통해 메인 스레드에서 UI 업데이트
             self.detail_window.update_obs_status_signal.emit()
             
@@ -3138,7 +3188,8 @@ class ExpTechHandler(QObject):
             
             # 이벤트 상태 관리자에 긴급지진속보 처리
             state_manager = self.detail_window.get_event_state_manager()
-            state_manager.handle_eew(event_id, serial_no, is_final, is_warning, is_canceled, "EXPTECH")
+            max_intensity = earthquake_data.get('max_intensity')
+            state_manager.handle_eew(event_id, serial_no, is_final, is_warning, is_canceled, "EXPTECH", max_intensity)
             # Signal을 통해 메인 스레드에서 UI 업데이트
             self.detail_window.update_obs_status_signal.emit()
             

@@ -658,6 +658,12 @@ class FlagSystemSettingsWindow(QDialog):
                 return f"{condition_type} ({', '.join(param_parts)}){delay_text}"
             return f"{condition_type}{delay_text}"
         
+        # 무감지진 조건의 경우 delay 시간 표시
+        elif condition_type == "무감지진":
+            if condition.delay > 0:
+                return f"{condition_type} (무감지 시간: {condition.delay}초)"
+            return f"{condition_type} (무감지 시간 미설정)"
+        
         # 기타 조건은 기본 형식
         return f"{condition_type}{delay_text}"
     
@@ -815,6 +821,7 @@ class FlagSystemSettingsWindow(QDialog):
         # 위젯 참조 저장
         self.active_config_list = active_list
         self.active_config_name_edit = active_name_edit
+        checkboxes_dict['_scroll_area'] = scroll_area  # scroll_area 참조 저장
         self.active_aggregated_checkboxes = checkboxes_dict
         
         # 초기 로드
@@ -975,9 +982,10 @@ class FlagSystemSettingsWindow(QDialog):
                 self.current_active_config = active_config
                 self.active_config_name_edit.setText(active_config.name)
                 
-                # 체크박스 업데이트
+                # 체크박스 업데이트 (존재하는 체크박스만 업데이트)
                 for type_id, checkbox in self.active_aggregated_checkboxes.items():
-                    checkbox.setChecked(type_id in active_config.aggregated_instance_types)
+                    if type_id != '_scroll_area' and type_id in self.instance_system.instance_types:
+                        checkbox.setChecked(type_id in active_config.aggregated_instance_types)
                 break
     
     def _on_active_config_name_changed(self, text: str):
